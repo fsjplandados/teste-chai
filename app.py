@@ -137,7 +137,7 @@ st.title("📊 Dashboard CRM - Performance de Clientes (Powered by DuckDB)")
 st.markdown(f"Analisando **{qtd_total:,.0f}** clientes em tempo real.".replace(",", "."))
 
 def fmt_n(v): return f"{int(v or 0):,}".replace(",", ".")
-def fmt_b(v): return f"R$ {(v or 0):, .2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+def fmt_b(v): return f"R$ {(v or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 st.markdown("<br>", unsafe_allow_html=True)
 

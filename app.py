@@ -49,6 +49,11 @@ def carregar_dados():
         # Isso permite carregar 11M de linhas ocupando apenas ~500MB de RAM.
         dfs = [pd.read_parquet(f, engine='pyarrow', dtype_backend='pyarrow') for f in files]
         df = pd.concat(dfs, ignore_index=True)
+        # Garantir que colunas de data sejam datetime (pandas) para comparações corretas
+        date_cols = ['PRIMEIRA_COMPRA', 'ULTIMA_COMPRA_GERAL', 'ULTIMA_COMPRA_LOJA', 'ULTIMA_COMPRA_DIGITAL', 'ULTIMA_COMPRA_OMNI']
+        for col in date_cols:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col])
         return df
     except Exception as e:
         st.error(f"Erro ao carregar os dados: {e}")
@@ -101,16 +106,17 @@ faixa_etaria = st.sidebar.selectbox("Faixa Etária", ["Todas", "Menor de 24", "E
 sexo = st.sidebar.selectbox("Sexo", ["Todos", "Feminino", "Masculino"])
 tipo_cliente = st.sidebar.selectbox("Tipo de Cliente", ["Todos"] + sorted(df_raw['TIPO_PESSOA'].dropna().unique().tolist()))
 
-# --- APLICAR FILTROS NO PANDAS ---
-df_filtrado = df_raw
+# --- APLICAR FILTROS NO PANDAS (OTIMIZADO PARA MEMÓRIA) ---
+# Em vez de criar cópias do DataFrame, criamos apenas uma máscara booleana.
+mask = pd.Series(True, index=df_raw.index)
 
-if uf_selecionada != "Todas": df_filtrado = df_filtrado[df_filtrado['UF'] == uf_selecionada]
-if cidade_selecionada != "Todas": df_filtrado = df_filtrado[df_filtrado['CIDADE'] == cidade_selecionada]
-if loja_selecionada != "Todas": df_filtrado = df_filtrado[df_filtrado['LOJA'] == loja_selecionada]
-if regiao_selecionada != "Todas": df_filtrado = df_filtrado[df_filtrado['REGIAO'] == regiao_selecionada]
-if faixa_etaria != "Todas": df_filtrado = df_filtrado[df_filtrado['FAIXA_ETARIA'] == faixa_etaria]
-if sexo != "Todos": df_filtrado = df_filtrado[df_filtrado['SEXO'] == sexo.upper()]
-if tipo_cliente != "Todos": df_filtrado = df_filtrado[df_filtrado['TIPO_PESSOA'] == tipo_cliente]
+if uf_selecionada != "Todas": mask &= (df_raw['UF'] == uf_selecionada)
+if cidade_selecionada != "Todas": mask &= (df_raw['CIDADE'] == cidade_selecionada)
+if loja_selecionada != "Todas": mask &= (df_raw['LOJA'] == loja_selecionada)
+if regiao_selecionada != "Todas": mask &= (df_raw['REGIAO'] == regiao_selecionada)
+if faixa_etaria != "Todas": mask &= (df_raw['FAIXA_ETARIA'] == faixa_etaria)
+if sexo != "Todos": mask &= (df_raw['SEXO'] == sexo.upper())
+if tipo_cliente != "Todos": mask &= (df_raw['TIPO_PESSOA'] == tipo_cliente)
 
 # Qual data usar para verificar 'Ativos'?
 col_ultima = 'ULTIMA_COMPRA_GERAL'
@@ -118,24 +124,29 @@ if canal == 'Loja': col_ultima = 'ULTIMA_COMPRA_LOJA'
 elif canal == 'Digital': col_ultima = 'ULTIMA_COMPRA_DIGITAL'
 elif canal == 'Omnichannel': col_ultima = 'ULTIMA_COMPRA_OMNI'
 
-# Calcular Métricas (comparação de datas funciona direto com date32[pyarrow])
-qtd_total = len(df_filtrado)
-qtd_identificados = df_filtrado['PRIMEIRA_COMPRA'].notna().sum()
+# Calcular Métricas usando a máscara (Evita estourar 1GB de RAM)
+qtd_total = mask.sum()
 
-# Novos (Primeira compra no período selecionado)
-mask_novos = (df_filtrado['PRIMEIRA_COMPRA'] >= data_inicio) & (df_filtrado['PRIMEIRA_COMPRA'] <= data_termino)
-qtd_novos = mask_novos.sum()
-
-# Ativos (Última compra no canal nos últimos 90 dias a partir da data de término)
-limite_ativos = data_termino - timedelta(days=90)
-mask_ativos = (df_filtrado[col_ultima] >= limite_ativos) & (df_filtrado[col_ultima] <= data_termino)
-qtd_ativos = mask_ativos.sum()
-
-# Receita e Ticket
-ltv_medio = df_filtrado['VALOR_TOTAL'].mean() if qtd_total > 0 else 0
-total_receita = df_filtrado['VALOR_TOTAL'].sum()
-total_tickets = df_filtrado['TOTAL_COMPRAS'].sum()
-ticket_medio = total_receita / total_tickets if total_tickets > 0 else 0
+# Filtramos apenas as colunas necessárias para os cálculos específicos
+if qtd_total > 0:
+    qtd_identificados = df_raw.loc[mask, 'PRIMEIRA_COMPRA'].notna().sum()
+    
+    # Novos (Primeira compra no período selecionado)
+    mask_novos = mask & (df_raw['PRIMEIRA_COMPRA'] >= data_inicio) & (df_raw['PRIMEIRA_COMPRA'] <= data_termino)
+    qtd_novos = mask_novos.sum()
+    
+    # Ativos (90 dias no canal)
+    limite_ativos = data_termino - timedelta(days=90)
+    mask_ativos = mask & (df_raw[col_ultima] >= limite_ativos) & (df_raw[col_ultima] <= data_termino)
+    qtd_ativos = mask_ativos.sum()
+    
+    # Receita e Ticket (usando loc[mask] para economizar memória)
+    ltv_medio = df_raw.loc[mask, 'VALOR_TOTAL'].mean()
+    total_receita = df_raw.loc[mask, 'VALOR_TOTAL'].sum()
+    total_tickets = df_raw.loc[mask, 'TOTAL_COMPRAS'].sum()
+    ticket_medio = total_receita / total_tickets if total_tickets > 0 else 0
+else:
+    qtd_identificados = qtd_novos = qtd_ativos = ltv_medio = ticket_medio = 0
 
 # --- LAYOUT PRINCIPAL ---
 st.title("📊 Dashboard CRM - Performance de Clientes")

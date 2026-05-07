@@ -1,0 +1,5 @@
+*.parquet
+!base_crm_p1.parquet
+!base_crm_p2.parquet
+test.parquet
+base_crm.parquet

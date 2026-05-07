@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Visão Geral Orçamento — Farmácias São João</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue:       #006EFF;
+      --blue-dark:  #0054CC;
+      --bg:         #F0F4F8;
+      --card-bg:    #FFFFFF;
+      --border:     #E5E7EB;
+      --text-1:     #111827;
+      --text-2:     #6B7280;
+      --text-3:     #9CA3AF;
+      --accent-purple: #7C3AED;
+      --accent-blue:   #0EA5E9;
+      --accent-green:  #10B981;
+      --accent-orange: #F97316;
+      --positive:  #059669;
+      --negative:  #DC2626;
+      --sidebar-w: 76px;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+
+    html, body { height: 100%; background: var(--bg); color: var(--text-1); }
+
+    /* ── Layout ─────────────────────────────── */
+    .layout {
+      display: grid;
+      grid-template-columns: var(--sidebar-w) 1fr;
+      min-height: 100vh;
+    }
+
+    /* ── Sidebar ────────────────────────────── */
+    .sidebar {
+      background: var(--blue);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px 0 24px;
+      position: fixed;
+      top: 0; left: 0;
+      width: var(--sidebar-w);
+      height: 100vh;
+      z-index: 100;
+      box-shadow: 4px 0 24px rgba(0,110,255,0.22);
+    }
+
+    .logo-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding-bottom: 25px;
+      border-bottom: 1px solid rgba(255,255,255,0.2);
+      width: 100%;
+      margin-bottom: 20px;
+    }
+    .logo-img {
+      width: 100%;
+      height: auto;
+      max-width: 50px;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.15));
+    }
+
+    .nav { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; }
+
+    .nav-item {
+      display: flex; align-items: center; justify-content: center;
+      width: 46px; height: 46px; border-radius: 12px;
+      color: rgba(255,255,255,0.6); text-decoration: none;
+      transition: all 0.2s ease; cursor: pointer;
+    }
+    .nav-item:hover { background: rgba(255,255,255,0.14); color: white; }
+    .nav-item.active {
+      background: rgba(255,255,255,0.22); color: white;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.35);
+    }
+    .nav-item svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+    /* ── Main ───────────────────────────────── */
+    .main {
+      margin-left: var(--sidebar-w);
+      padding: 0 36px 48px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Topbar ─────────────────────────────── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 26px 0 18px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+    .topbar h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-1); }
+    .user-pill {
+      display: flex; align-items: center; gap: 10px;
+      background: white; border: 1px solid var(--border);
+      border-radius: 100px; padding: 5px 14px 5px 5px;
+      font-size: 13px; font-weight: 500; color: var(--text-2);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .user-avatar {
+      width: 30px; height: 30px; border-radius: 50%;
+      background: var(--blue); color: white;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 700;
+    }
+
+    /* ── Filter bar ─────────────────────────── */
+    .filter-bar {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 0 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      min-height: 58px;
+    }
+
+    .tab-group {
+      display: flex;
+      border-right: 1px solid var(--border);
+      padding-right: 24px;
+      flex-shrink: 0;
+    }
+
+    .tab-btn {
+      background: none; border: none; cursor: pointer;
+      font-family: inherit; font-size: 12px; font-weight: 700;
+      letter-spacing: 0.08em; color: var(--text-3);
+      padding: 18px 18px 15px;
+      position: relative;
+      transition: color 0.2s;
+    }
+    .tab-btn::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 14px; right: 14px;
+      height: 3px; border-radius: 3px 3px 0 0;
+      transform: scaleX(0);
+      transition: transform 0.25s ease;
+    }
+    .tab-btn.active-periodo { color: var(--accent-orange); }
+    .tab-btn.active-periodo::after { background: var(--accent-orange); transform: scaleX(1); }
+    .tab-btn.active-canal { color: var(--blue); }
+    .tab-btn.active-canal::after { background: var(--blue); transform: scaleX(1); }
+
+    .filter-panels { display: flex; gap: 16px; align-items: center; }
+    .filter-panel { display: none; gap: 16px; align-items: center; }
+    .filter-panel.visible { display: flex; animation: fadeSlide 0.2s ease; }
+
+    @keyframes fadeSlide {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .f-group { display: flex; flex-direction: column; gap: 2px; }
+    .f-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.07em; }
+    .f-select {
+      font-family: inherit; font-size: 13px; font-weight: 500; color: var(--text-1);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 6px 28px 6px 10px; background: var(--bg);
+      appearance: none; cursor: pointer;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%236B7280'%3E%3Cpath d='M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 6px center; background-size: 16px;
+      transition: border-color 0.2s;
+    }
+    .f-select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(0,110,255,0.1); }
+
+    /* ── Cards ──────────────────────────────── */
+    .cards { display: flex; flex-direction: column; gap: 20px; }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 2px 14px rgba(0,0,0,0.06);
+      overflow: hidden;
+      transition: box-shadow 0.25s, transform 0.2s;
+    }
+    .card:hover { box-shadow: 0 8px 32px rgba(0,110,255,0.11); transform: translateY(-2px); }
+
+    .card-header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 16px 24px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .accent-bar { width: 4px; height: 22px; border-radius: 4px; flex-shrink: 0; }
+    .accent-purple { background: var(--accent-purple); }
+    .accent-blue   { background: var(--accent-blue); }
+    .accent-green  { background: var(--accent-green); }
+
+    .card-title {
+      font-size: 12px; font-weight: 700;
+      letter-spacing: 0.09em; color: var(--text-2);
+      text-transform: uppercase; flex: 1;
+    }
+
+    .badge {
+      font-size: 11px; font-weight: 700;
+      padding: 3px 10px; border-radius: 100px;
+    }
+    .badge-up   { background: #DCFCE7; color: var(--positive); }
+    .badge-down { background: #FEE2E2; color: var(--negative); }
+
+    .card-body { padding: 20px 24px; }
+
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    .kpi { display: flex; flex-direction: column; gap: 4px; }
+    .kpi-lbl {
+      font-size: 10px; font-weight: 600;
+      color: var(--text-3); text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .kpi-val {
+      font-size: 22px; font-weight: 800;
+      color: var(--text-1); letter-spacing: -0.02em; line-height: 1;
+    }
+    .kpi-val.dim  { color: var(--text-2); font-weight: 600; font-size: 19px; }
+    .kpi-val.pos  { color: var(--positive); }
+    .kpi-val.neg  { color: var(--negative); }
+
+    .chart-wrap { position: relative; height: 100px; }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ─── Sidebar ─────────────────────── -->
+  <aside class="sidebar">
+    <div class="logo-wrap">
+      <img src="Logotipo em branco.svg" class="logo-img" alt="Logo São João">
+    </div>
+
+    <nav class="nav">
+      <a class="nav-item" title="Home">
+        <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      </a>
+      <a class="nav-item active" title="Orçamento">
+        <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      </a>
+      <a class="nav-item" title="Relatórios">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+      </a>
+      <a class="nav-item" title="Usuários">
+        <svg viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M21 21v-2a4 4 0 0 0-3-3.87"/></svg>
+      </a>
+    </nav>
+  </aside>
+
+  <!-- ─── Main ─────────────────────────── -->
+  <main class="main">
+
+    <header class="topbar">
+      <h1>Visão Geral Orçamento</h1>
+      <div class="user-pill">
+        <div class="user-avatar">S</div>
+        Farmácias São João
+      </div>
+    </header>
+
+    <!-- Filters -->
+    <div class="filter-bar">
+      <div class="tab-group">
+        <button class="tab-btn active-periodo" id="btn-periodo" onclick="setTab('periodo')">PERÍODO</button>
+        <button class="tab-btn" id="btn-canal" onclick="setTab('canal')">CANAL</button>
+      </div>
+      <div class="filter-panels">
+        <div class="filter-panel visible" id="panel-periodo">
+          <div class="f-group">
+            <label class="f-lbl">Período</label>
+            <select class="f-select" onchange="updateCharts()">
+              <option>Último mês</option>
+              <option>Último trimestre</option>
+              <option>Último semestre</option>
+              <option selected>Último ano</option>
+            </select>
+          </div>
+          <div class="f-group">
+            <label class="f-lbl">Ano</label>
+            <select class="f-select">
+              <option selected>2025</option>
+              <option>2024</option>
+              <option>2023</option>
+            </select>
+          </div>
+        </div>
+        <div class="filter-panel" id="panel-canal">
+          <div class="f-group">
+            <label class="f-lbl">Canal</label>
+            <select class="f-select">
+              <option>Todos</option>
+              <option>Loja Física</option>
+              <option>E-commerce</option>
+              <option>Televendas</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI Cards -->
+    <div class="cards">
+
+      <!-- 1. Ticket Médio -->
+      <div class="card">
+        <div class="card-header">
+          <div class="accent-bar accent-purple"></div>
+          <span class="card-title">Ticket Médio</span>
+          <span class="badge badge-up" id="badge-ticket">▲ 4,2%</span>
+        </div>
+        <div class="card-body">
+          <div class="kpi-row">
+            <div class="kpi">
+              <span class="kpi-lbl">Real</span>
+              <span class="kpi-val" id="real-ticket">R$ 87,40</span>
+            </div>
+            <div class="kpi">
+              <span class="kpi-lbl">Meta</span>
+              <span class="kpi-val dim">R$ 83,90</span>
+            </div>
+            <div class="kpi">
+              <span class="kpi-lbl">vs. Meta</span>
+              <span class="kpi-val pos">+4,2%</span>
+            </div>
+            <div class="kpi">
+              <span class="kpi-lbl">vs. Ano Ant.</span>
+              <span class="kpi-val pos">+6,1%</span>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-ticket"></canvas></div>
+        </div>
+      </div>
+
+      <!-- 2. Desvio Rent. Op. -->
+      <div class="card">
+        <div class="card-header">
+          <div class="accent-bar accent-blue"></div>
+          <span class="card-title">Desvio  Rent. Op.</span>
+          <span class="badge badge-down" id="badge-rent">▼ 1,8 p.p.</span>
+        </div>
+        <div class="card-body">
+          <div class="kpi-row">
+            <div class="kpi">
+              <span class="kpi-lbl">Real</span>
+              <span class="kpi-val" id="real-rent">8,2%</span>
+            </div>
+            <div class="kpi">
+              <span class="kpi-lbl">Meta</span>
+              <span class="kpi-val dim">10,0%</span>
+            </div>
+            <div class="kpi">
+              <span class="kpi-lbl">Desvio</span>
+              <span class="kpi-val neg">-1,8 p.p.</span>
+            </div>
+            <div class="kpi">
+              <span class="kpi-lbl">vs. Ano Ant.</span>
+              <span class="kpi-val neg">-0,5 p.p.</span>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-rent"></canvas></div>
+        </div>
+      </div>
+
+      <!-- 3. Desvio Faturamento -->
+      <div class="card">
+        <div class="card-header">
+          <div class="accent-bar accent-green"></div>
+          <span class="card-title">Desvio  Faturamento</span>
+          <span class="badge badge-up" id="badge-fat">▲ 2,9%</span>
+        </div>
+        <div class="card-body">
+          <div class="kpi-row">
+            <div class="kpi">
+              <span class="kpi-lbl">Real</span>
+              <span class="kpi-val" id="real-fat">R$ 12,4M</span>
+            </div>
+            <div class="kpi">
+              <span class="kpi-lbl">Meta</span>
+              <span class="kpi-val dim">R$ 12,1M</span>
+            </div>
+            <div class="kpi">
+              <span class="kpi-lbl">Desvio</span>
+              <span class="kpi-val pos">+R$ 347K</span>
+            </div>
+            <div class="kpi">
+              <span class="kpi-lbl">vs. Ano Ant.</span>
+              <span class="kpi-val pos">+9,3%</span>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-fat"></canvas></div>
+        </div>
+      </div>
+
+    </div><!-- /cards -->
+  </main>
+</div>
+
+<script>
+/* ── Tab switching ─────────────────────────── */
+function setTab(tab) {
+  const btnP = document.getElementById('btn-periodo');
+  const btnC = document.getElementById('btn-canal');
+  const panP = document.getElementById('panel-periodo');
+  const panC = document.getElementById('panel-canal');
+
+  btnP.className = 'tab-btn';
+  btnC.className = 'tab-btn';
+  panP.classList.remove('visible');
+  panC.classList.remove('visible');
+
+  if (tab === 'periodo') {
+    btnP.classList.add('active-periodo');
+    panP.classList.add('visible');
+  } else {
+    btnC.classList.add('active-canal');
+    panC.classList.add('visible');
+  }
+}
+
+/* ── Chart factory ─────────────────────────── */
+Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+Chart.defaults.font.size = 11;
+Chart.defaults.color = '#9CA3AF';
+
+const labels = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+
+function mkGrad(ctx, color) {
+  const g = ctx.createLinearGradient(0, 0, 0, 100);
+  g.addColorStop(0, color + '40');
+  g.addColorStop(1, color + '00');
+  return g;
+}
+
+function makeChart(id, color, realData, metaData, fmt) {
+  const canvas = document.getElementById(id);
+  const ctx = canvas.getContext('2d');
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Real',
+          data: realData,
+          borderColor: color,
+          backgroundColor: mkGrad(ctx, color),
+          fill: true,
+          tension: 0.42,
+          borderWidth: 2.5,
+          pointRadius: 3,
+          pointHoverRadius: 6,
+          pointBorderWidth: 2,
+          pointBackgroundColor: '#fff',
+        },
+        {
+          label: 'Meta',
+          data: metaData,
+          borderColor: '#D1D5DB',
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.42,
+          borderWidth: 2,
+          borderDash: [5, 4],
+          pointRadius: 2,
+          pointHoverRadius: 5,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#111827', titleColor: '#fff',
+          bodyColor: '#D1D5DB', padding: 10, borderRadius: 8,
+          callbacks: {
+            label: (ctx) => ` ${ctx.dataset.label}: ${fmt(ctx.parsed.y)}`
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+        y: { display: false }
+      }
+    }
+  });
+}
+
+/* ── Instantiate charts ────────────────────── */
+const brl = v => 'R$ ' + v.toFixed(2).replace('.', ',');
+const pct = v => v.toFixed(1).replace('.', ',') + '%';
+const mil = v => 'R$ ' + v.toFixed(1).replace('.', ',') + 'M';
+
+const ticketReal = [76.2, 78.5, 80.1, 79.6, 82.3, 83.8, 81.9, 84.4, 85.2, 86.0, 87.1, 87.4];
+const ticketMeta = [80,80,81,81,82,82,83,83,83,84,84,83.9];
+
+const rentReal = [10.2,9.8,9.5,9.0,8.8,8.6,8.5,8.3,8.4,8.3,8.2,8.2];
+const rentMeta = [10,10,10,10,10,10,10,10,10,10,10,10];
+
+const fatReal = [10.1,10.4,10.7,10.9,11.2,11.5,11.3,11.8,11.9,12.1,12.3,12.4];
+const fatMeta = [9.8,10.0,10.2,10.4,10.6,10.8,10.9,11.1,11.3,11.5,11.8,12.1];
+
+makeChart('chart-ticket', '#7C3AED', ticketReal, ticketMeta, brl);
+makeChart('chart-rent',   '#0EA5E9', rentReal,   rentMeta,   pct);
+makeChart('chart-fat',    '#10B981', fatReal,    fatMeta,    mil);
+
+function updateCharts() { /* hook for future live data */ }
+</script>
+
+</body>
+</html>

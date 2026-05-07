@@ -62,17 +62,41 @@ st.markdown("""
     .dash-title { font-size: 24px; font-weight: 800; color: var(--text-1); margin-bottom: 20px; }
 
     /* ── Barra de Filtros (Estilo Premium) ── */
-    .filter-container {
-        background: #fff; border: 1px solid var(--border); border-radius: 14px;
-        padding: 16px 24px; margin-bottom: 28px;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+    div[data-testid="stForm"] {
+        background: #fff !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 16px !important;
+        padding: 24px 32px !important;
+        margin-bottom: 32px !important;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
+    
     .stSelectbox label, .stDateInput label {
-        font-size: 10px !important; font-weight: 700 !important;
-        color: var(--text-3) !important; text-transform: uppercase !important;
-        letter-spacing: .08em !important; margin-bottom: 4px !important;
+        font-size: 11px !important; font-weight: 700 !important;
+        color: var(--text-2) !important; /* Mais escuro para melhor leitura */
+        text-transform: uppercase !important;
+        letter-spacing: .06em !important; margin-bottom: 8px !important;
     }
-    div[data-testid="stForm"] { border: none !important; padding: 0 !important; background: transparent !important; box-shadow: none !important; }
+
+    /* Botão Filtrar Customizado */
+    div[data-testid="stForm"] button {
+        background-color: var(--blue) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 10px !important;
+        padding: 10px 24px !important;
+        font-weight: 700 !important;
+        font-size: 13px !important;
+        width: 100% !important;
+        margin-top: 22px !important;
+        box-shadow: 0 4px 12px rgba(0,110,255,0.2) !important;
+        transition: all 0.3s !important;
+    }
+    div[data-testid="stForm"] button:hover {
+        background-color: #0056cc !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 16px rgba(0,110,255,0.3) !important;
+    }
 
     /* ── Grid de Cards (Original crm.bat) ── */
     .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }

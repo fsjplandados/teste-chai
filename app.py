@@ -89,76 +89,73 @@ canal = st.sidebar.selectbox("Canal de Venda", ["Total", "Loja", "Digital", "Omn
 st.sidebar.markdown("---")
 st.sidebar.subheader("Demográficos")
 
-# Usamos o df_lookup para preencher os filtros instantaneamente
-ufs = ["Todas"] + sorted(df_lookup['UF'].unique().tolist())
+# Preencher Dropdowns usando o df_lookup (Tabela pequena)
+def get_options(col, filter_col=None, filter_val=None):
+    if filter_col and filter_val and filter_val != "Todas":
+        return ["Todas"] + sorted(df_lookup[df_lookup[filter_col] == filter_val][col].unique().tolist())
+    return ["Todas"] + sorted(df_lookup[col].unique().tolist())
+
+ufs = get_options('UF')
 uf_selecionada = st.sidebar.selectbox("UF da Loja", ufs)
 
-cidades_opcoes = ["Todas"]
-if uf_selecionada != "Todas":
-    cidades_filtradas = df_lookup[df_lookup['UF'] == uf_selecionada]['CIDADE'].unique().tolist()
-    cidades_opcoes += sorted(cidades_filtradas)
-else:
-    cidades_opcoes += sorted(df_lookup['CIDADE'].unique().tolist())
+cidades_opcoes = get_options('CIDADE', 'UF', uf_selecionada)
 cidade_selecionada = st.sidebar.selectbox("Cidade da Loja", cidades_opcoes)
 
-lojas_opcoes = ["Todas"]
-if cidade_selecionada != "Todas":
-    lojas_filtradas = df_lookup[df_lookup['CIDADE'] == cidade_selecionada]['LOJA'].unique().tolist()
-    lojas_opcoes += sorted(lojas_filtradas)
-elif uf_selecionada != "Todas":
-    lojas_filtradas = df_lookup[df_lookup['UF'] == uf_selecionada]['LOJA'].unique().tolist()
-    lojas_opcoes += sorted(lojas_filtradas)
-else:
-    lojas_opcoes += sorted(df_lookup['LOJA'].unique().tolist())
-loja_selecionada = st.sidebar.selectbox("Loja", loja_selecionada if 'loja_selecionada' in locals() else 0, options=lojas_opcoes) if False else st.sidebar.selectbox("Loja", lojas_opcoes)
+lojas_opcoes = get_options('LOJA', 'CIDADE', cidade_selecionada) if cidade_selecionada != "Todas" else get_options('LOJA', 'UF', uf_selecionada)
+loja_selecionada = st.sidebar.selectbox("Loja", lojas_opcoes)
 
-regiao_selecionada = st.sidebar.selectbox("Região", ["Todas"] + sorted(df_lookup['REGIAO'].unique().tolist()))
+regiao_selecionada = st.sidebar.selectbox("Região", get_options('REGIAO'))
 faixa_etaria = st.sidebar.selectbox("Faixa Etária", ["Todas", "Menor de 24", "Entre 25 e 34", "Entre 35 e 44", "Entre 45 e 54", "Entre 55 e 64", "Mais de 65"])
 sexo = st.sidebar.selectbox("Sexo", ["Todos", "Feminino", "Masculino"])
-tipo_cliente = st.sidebar.selectbox("Tipo de Cliente", ["Todos"] + sorted(df_lookup['TIPO_PESSOA'].unique().tolist()))
-
+tipo_cliente = st.sidebar.selectbox("Tipo de Cliente", get_options('TIPO_PESSOA'))
 
 # --- APLICAR FILTROS NO PANDAS (OTIMIZADO PARA MEMÓRIA) ---
-# Em vez de criar cópias do DataFrame, criamos apenas uma máscara booleana.
-mask = pd.Series(True, index=df_raw.index)
+try:
+    # Em vez de criar cópias do DataFrame, criamos apenas uma máscara booleana.
+    mask = pd.Series(True, index=df_raw.index)
 
-if uf_selecionada != "Todas": mask &= (df_raw['UF'] == uf_selecionada)
-if cidade_selecionada != "Todas": mask &= (df_raw['CIDADE'] == cidade_selecionada)
-if loja_selecionada != "Todas": mask &= (df_raw['LOJA'] == loja_selecionada)
-if regiao_selecionada != "Todas": mask &= (df_raw['REGIAO'] == regiao_selecionada)
-if faixa_etaria != "Todas": mask &= (df_raw['FAIXA_ETARIA'] == faixa_etaria)
-if sexo != "Todos": mask &= (df_raw['SEXO'] == sexo.upper())
-if tipo_cliente != "Todos": mask &= (df_raw['TIPO_PESSOA'] == tipo_cliente)
+    if uf_selecionada != "Todas": mask &= (df_raw['UF'] == uf_selecionada)
+    if cidade_selecionada != "Todas": mask &= (df_raw['CIDADE'] == cidade_selecionada)
+    if loja_selecionada != "Todas": mask &= (df_raw['LOJA'] == loja_selecionada)
+    if regiao_selecionada != "Todas": mask &= (df_raw['REGIAO'] == regiao_selecionada)
+    if faixa_etaria != "Todas": mask &= (df_raw['FAIXA_ETARIA'] == faixa_etaria)
+    if sexo != "Todos": mask &= (df_raw['SEXO'] == sexo.upper())
+    if tipo_cliente != "Todos": mask &= (df_raw['TIPO_PESSOA'] == tipo_cliente)
 
-# Qual data usar para verificar 'Ativos'?
-col_ultima = 'ULTIMA_COMPRA_GERAL'
-if canal == 'Loja': col_ultima = 'ULTIMA_COMPRA_LOJA'
-elif canal == 'Digital': col_ultima = 'ULTIMA_COMPRA_DIGITAL'
-elif canal == 'Omnichannel': col_ultima = 'ULTIMA_COMPRA_OMNI'
+    # Qual data usar para verificar 'Ativos'?
+    col_ultima = 'ULTIMA_COMPRA_GERAL'
+    if canal == 'Loja': col_ultima = 'ULTIMA_COMPRA_LOJA'
+    elif canal == 'Digital': col_ultima = 'ULTIMA_COMPRA_DIGITAL'
+    elif canal == 'Omnichannel': col_ultima = 'ULTIMA_COMPRA_OMNI'
 
-# Calcular Métricas usando a máscara (Evita estourar 1GB de RAM)
-qtd_total = mask.sum()
+    # Calcular Métricas usando a máscara (Evita estourar 1GB de RAM)
+    qtd_total = mask.sum()
 
-# Filtramos apenas as colunas necessárias para os cálculos específicos
-if qtd_total > 0:
-    qtd_identificados = df_raw.loc[mask, 'PRIMEIRA_COMPRA'].notna().sum()
-    
-    # Novos (Primeira compra no período selecionado)
-    mask_novos = mask & (df_raw['PRIMEIRA_COMPRA'] >= data_inicio) & (df_raw['PRIMEIRA_COMPRA'] <= data_termino)
-    qtd_novos = mask_novos.sum()
-    
-    # Ativos (90 dias no canal)
-    limite_ativos = data_termino - timedelta(days=90)
-    mask_ativos = mask & (df_raw[col_ultima] >= limite_ativos) & (df_raw[col_ultima] <= data_termino)
-    qtd_ativos = mask_ativos.sum()
-    
-    # Receita e Ticket (usando loc[mask] para economizar memória)
-    ltv_medio = df_raw.loc[mask, 'VALOR_TOTAL'].mean()
-    total_receita = df_raw.loc[mask, 'VALOR_TOTAL'].sum()
-    total_tickets = df_raw.loc[mask, 'TOTAL_COMPRAS'].sum()
-    ticket_medio = total_receita / total_tickets if total_tickets > 0 else 0
-else:
-    qtd_identificados = qtd_novos = qtd_ativos = ltv_medio = ticket_medio = 0
+    # Filtramos apenas as colunas necessárias para os cálculos específicos
+    if qtd_total > 0:
+        qtd_identificados = df_raw.loc[mask, 'PRIMEIRA_COMPRA'].notna().sum()
+        
+        # Novos (Primeira compra no período selecionado)
+        mask_novos = mask & (df_raw['PRIMEIRA_COMPRA'] >= data_inicio) & (df_raw['PRIMEIRA_COMPRA'] <= data_termino)
+        qtd_novos = mask_novos.sum()
+        
+        # Ativos (90 dias no canal)
+        limite_ativos = data_termino - timedelta(days=90)
+        mask_ativos = mask & (df_raw[col_ultima] >= limite_ativos) & (df_raw[col_ultima] <= data_termino)
+        qtd_ativos = mask_ativos.sum()
+        
+        # Receita e Ticket (usando loc[mask] para economizar memória)
+        ltv_medio = df_raw.loc[mask, 'VALOR_TOTAL'].mean()
+        total_receita = df_raw.loc[mask, 'VALOR_TOTAL'].sum()
+        total_tickets = df_raw.loc[mask, 'TOTAL_COMPRAS'].sum()
+        ticket_medio = total_receita / total_tickets if total_tickets > 0 else 0
+    else:
+        qtd_identificados = qtd_novos = qtd_ativos = ltv_medio = ticket_medio = 0
+
+except Exception as e:
+    st.error(f"Ocorreu um erro ao processar os filtros: {e}")
+    st.stop()
+
 
 # --- LAYOUT PRINCIPAL ---
 st.title("📊 Dashboard CRM - Performance de Clientes")

@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import duckdb
 from datetime import datetime, timedelta, date
 import os
 import glob
@@ -7,7 +8,7 @@ import glob
 # Configuração da página
 st.set_page_config(page_title="Dashboard CRM - Farmácias São João", layout="wide", initial_sidebar_state="expanded")
 
-# CSS customizado para os cartões bonitos (mantendo o estilo original)
+# CSS customizado para os cartões bonitos
 st.markdown("""
 <style>
     .metric-card {
@@ -34,171 +35,120 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- CONEXÃO DUCKDB ---
+# DuckDB permite consultar arquivos Parquet diretamente sem carregar tudo na RAM.
+@st.cache_resource
+def get_con():
+    return duckdb.connect(database=':memory:')
+
+con = get_con()
+
+# --- PREPARAÇÃO DE FILTROS (LOOKUP TABLE) ---
 @st.cache_data(ttl="1d")
-def carregar_dados():
+def carregar_lookup():
+    # Carregamos apenas uma fração dos dados para os filtros da barra lateral
     try:
-        files = sorted(glob.glob('base_crm_p*.parquet'))
-        if not files:
-            if os.path.exists('base_crm.parquet'):
-                files = ['base_crm.parquet']
-            else:
-                st.error("Arquivos de base (.parquet) não encontrados.")
-                return pd.DataFrame()
-        
-        # OTIMIZAÇÃO CRÍTICA: Usar backend pyarrow para economizar 75% de memória (necessário para Streamlit Cloud 1GB)
-        # Isso permite carregar 11M de linhas ocupando apenas ~500MB de RAM.
-        dfs = [pd.read_parquet(f, engine='pyarrow', dtype_backend='pyarrow') for f in files]
-        df = pd.concat(dfs, ignore_index=True)
-        # Garantir que colunas de data sejam datetime (pandas) para comparações corretas
-        date_cols = ['PRIMEIRA_COMPRA', 'ULTIMA_COMPRA_GERAL', 'ULTIMA_COMPRA_LOJA', 'ULTIMA_COMPRA_DIGITAL', 'ULTIMA_COMPRA_OMNI']
-        for col in date_cols:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col])
+        # DuckDB lê as colunas de texto e faz o DISTINCT em milissegundos
+        df = con.execute("""
+            SELECT DISTINCT UF, CIDADE, LOJA, REGIAO, TIPO_PESSOA 
+            FROM read_parquet('base_crm_p*.parquet')
+            WHERE UF IS NOT NULL
+        """).df()
         return df
-    except Exception as e:
-        st.error(f"Erro ao carregar os dados: {e}")
+    except:
         return pd.DataFrame()
 
-df_raw = carregar_dados()
-
-if df_raw.empty:
-    st.stop()
-
-# --- PREPARAÇÃO DE FILTROS (OTIMIZADO) ---
-@st.cache_data(ttl="1d")
-def get_lookup_table(_df):
-    # Cria uma tabela minúscula apenas com as combinações únicas de locais
-    return _df[['UF', 'CIDADE', 'LOJA', 'REGIAO', 'TIPO_PESSOA']].drop_duplicates().dropna()
-
-df_lookup = get_lookup_table(df_raw)
+df_lookup = carregar_lookup()
 
 # --- BARRA LATERAL (FILTROS) ---
 st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/4/4b/Logo_Farmacias_Sao_Joao.png", width=150)
 st.sidebar.title("Filtros CRM")
 
-# Calendário
-hoje = date.today()
-inicio_padrao = hoje - timedelta(days=28)
-
 col1, col2 = st.sidebar.columns(2)
-data_inicio = col1.date_input("Data Início", value=inicio_padrao)
-data_termino = col2.date_input("Data Término", value=hoje)
+data_inicio = col1.date_input("Data Início", value=date(2025, 1, 1))
+data_termino = col2.date_input("Data Término", value=date.today())
 
 canal = st.sidebar.selectbox("Canal de Venda", ["Total", "Loja", "Digital", "Omnichannel"])
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Demográficos")
 
-# Preencher Dropdowns usando o df_lookup (Tabela pequena)
-def get_options(col, filter_col=None, filter_val=None):
-    if filter_col and filter_val and filter_val != "Todas":
-        return ["Todas"] + sorted(df_lookup[df_lookup[filter_col] == filter_val][col].unique().tolist())
+def get_opts(col, f_col=None, f_val=None):
+    if df_lookup.empty: return ["Todas"]
+    if f_col and f_val and f_val != "Todas":
+        return ["Todas"] + sorted(df_lookup[df_lookup[f_col] == f_val][col].unique().tolist())
     return ["Todas"] + sorted(df_lookup[col].unique().tolist())
 
-ufs = get_options('UF')
-uf_selecionada = st.sidebar.selectbox("UF da Loja", ufs)
-
-cidades_opcoes = get_options('CIDADE', 'UF', uf_selecionada)
-cidade_selecionada = st.sidebar.selectbox("Cidade da Loja", cidades_opcoes)
-
-lojas_opcoes = get_options('LOJA', 'CIDADE', cidade_selecionada) if cidade_selecionada != "Todas" else get_options('LOJA', 'UF', uf_selecionada)
-loja_selecionada = st.sidebar.selectbox("Loja", lojas_opcoes)
-
-regiao_selecionada = st.sidebar.selectbox("Região", get_options('REGIAO'))
+uf_sel = st.sidebar.selectbox("UF da Loja", get_opts('UF'))
+cid_sel = st.sidebar.selectbox("Cidade da Loja", get_opts('CIDADE', 'UF', uf_sel))
+loj_sel = st.sidebar.selectbox("Loja", get_opts('LOJA', 'CIDADE', cid_sel) if cid_sel != "Todas" else get_opts('LOJA', 'UF', uf_sel))
+reg_sel = st.sidebar.selectbox("Região", get_opts('REGIAO'))
 faixa_etaria = st.sidebar.selectbox("Faixa Etária", ["Todas", "Menor de 24", "Entre 25 e 34", "Entre 35 e 44", "Entre 45 e 54", "Entre 55 e 64", "Mais de 65"])
 sexo = st.sidebar.selectbox("Sexo", ["Todos", "Feminino", "Masculino"])
-tipo_cliente = st.sidebar.selectbox("Tipo de Cliente", get_options('TIPO_PESSOA'))
+tipo_cliente = st.sidebar.selectbox("Tipo de Cliente", get_opts('TIPO_PESSOA'))
 
-# --- APLICAR FILTROS NO PANDAS (OTIMIZADO PARA MEMÓRIA) ---
+# --- CÁLCULO DE MÉTRICAS COM DUCKDB (MUITO MAIS LEVE) ---
+def calcular_metricas():
+    # Construindo a cláusula WHERE dinamicamente
+    where_clauses = ["1=1"]
+    if uf_sel != "Todas": where_clauses.append(f"UF = '{uf_sel}'")
+    if cid_sel != "Todas": where_clauses.append(f"CIDADE = '{cid_sel}'")
+    if loj_sel != "Todas": where_clauses.append(f"LOJA = '{loj_sel}'")
+    if reg_sel != "Todas": where_clauses.append(f"REGIAO = '{reg_sel}'")
+    if faixa_etaria != "Todas": where_clauses.append(f"FAIXA_ETARIA = '{faixa_etaria}'")
+    if sexo != "Todos": where_clauses.append(f"SEXO = '{sexo[0].upper()}'")
+    if tipo_cliente != "Todos": where_clauses.append(f"TIPO_PESSOA = '{tipo_cliente}'")
+    
+    where_str = " AND ".join(where_clauses)
+    
+    # Define a coluna de data conforme o canal
+    col_dt = "ULTIMA_COMPRA_GERAL"
+    if canal == 'Loja': col_dt = "ULTIMA_COMPRA_LOJA"
+    elif canal == 'Digital': col_dt = "ULTIMA_COMPRA_DIGITAL"
+    elif canal == 'Omnichannel': col_dt = "ULTIMA_COMPRA_OMNI"
+    
+    limite_ativos = (data_termino - timedelta(days=90)).strftime('%Y-%m-%d')
+    dt_ini = data_inicio.strftime('%Y-%m-%d')
+    dt_fim = data_termino.strftime('%Y-%m-%d')
+
+    sql = f"""
+    SELECT 
+        COUNT(*) as total,
+        COUNT(PRIMEIRA_COMPRA) as ident,
+        SUM(CASE WHEN PRIMEIRA_COMPRA BETWEEN '{dt_ini}' AND '{dt_fim}' THEN 1 ELSE 0 END) as novos,
+        SUM(CASE WHEN {col_dt} BETWEEN '{limite_ativos}' AND '{dt_fim}' THEN 1 ELSE 0 END) as ativos,
+        AVG(VALOR_TOTAL) as ltv,
+        SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0) as ticket
+    FROM read_parquet('base_crm_p*.parquet')
+    WHERE {where_str}
+    """
+    
+    return con.execute(sql).fetchone()
+
 try:
-    # Em vez de criar cópias do DataFrame, criamos apenas uma máscara booleana.
-    mask = pd.Series(True, index=df_raw.index)
-
-    if uf_selecionada != "Todas": mask &= (df_raw['UF'] == uf_selecionada)
-    if cidade_selecionada != "Todas": mask &= (df_raw['CIDADE'] == cidade_selecionada)
-    if loja_selecionada != "Todas": mask &= (df_raw['LOJA'] == loja_selecionada)
-    if regiao_selecionada != "Todas": mask &= (df_raw['REGIAO'] == regiao_selecionada)
-    if faixa_etaria != "Todas": mask &= (df_raw['FAIXA_ETARIA'] == faixa_etaria)
-    if sexo != "Todos": mask &= (df_raw['SEXO'] == sexo.upper())
-    if tipo_cliente != "Todos": mask &= (df_raw['TIPO_PESSOA'] == tipo_cliente)
-
-    # Qual data usar para verificar 'Ativos'?
-    col_ultima = 'ULTIMA_COMPRA_GERAL'
-    if canal == 'Loja': col_ultima = 'ULTIMA_COMPRA_LOJA'
-    elif canal == 'Digital': col_ultima = 'ULTIMA_COMPRA_DIGITAL'
-    elif canal == 'Omnichannel': col_ultima = 'ULTIMA_COMPRA_OMNI'
-
-    # Calcular Métricas usando a máscara (Evita estourar 1GB de RAM)
-    qtd_total = mask.sum()
-
-    # Filtramos apenas as colunas necessárias para os cálculos específicos
-    if qtd_total > 0:
-        qtd_identificados = df_raw.loc[mask, 'PRIMEIRA_COMPRA'].notna().sum()
-        
-        # Novos (Primeira compra no período selecionado)
-        mask_novos = mask & (df_raw['PRIMEIRA_COMPRA'] >= data_inicio) & (df_raw['PRIMEIRA_COMPRA'] <= data_termino)
-        qtd_novos = mask_novos.sum()
-        
-        # Ativos (90 dias no canal)
-        limite_ativos = data_termino - timedelta(days=90)
-        mask_ativos = mask & (df_raw[col_ultima] >= limite_ativos) & (df_raw[col_ultima] <= data_termino)
-        qtd_ativos = mask_ativos.sum()
-        
-        # Receita e Ticket (usando loc[mask] para economizar memória)
-        ltv_medio = df_raw.loc[mask, 'VALOR_TOTAL'].mean()
-        total_receita = df_raw.loc[mask, 'VALOR_TOTAL'].sum()
-        total_tickets = df_raw.loc[mask, 'TOTAL_COMPRAS'].sum()
-        ticket_medio = total_receita / total_tickets if total_tickets > 0 else 0
-    else:
-        qtd_identificados = qtd_novos = qtd_ativos = ltv_medio = ticket_medio = 0
-
+    res = calcular_metricas()
+    qtd_total, qtd_ident, qtd_novos, qtd_ativos, ltv_medio, ticket_medio = res
 except Exception as e:
-    st.error(f"Ocorreu um erro ao processar os filtros: {e}")
+    st.error(f"Erro no processamento SQL: {e}")
     st.stop()
 
-
 # --- LAYOUT PRINCIPAL ---
-st.title("📊 Dashboard CRM - Performance de Clientes")
-st.markdown(f"Dashboard carregado com **{qtd_total:,.0f}** clientes. Filtros aplicados em tempo real.".replace(",", "."))
+st.title("📊 Dashboard CRM - Performance de Clientes (Powered by DuckDB)")
+st.markdown(f"Analisando **{qtd_total:,.0f}** clientes em tempo real.".replace(",", "."))
 
-def fmt_n(v): return f"{int(v):,}".replace(",", ".")
-def fmt_b(v): return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+def fmt_n(v): return f"{int(v or 0):,}".replace(",", ".")
+def fmt_b(v): return f"R$ {(v or 0):, .2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Grid de cartões usando HTML
 html_cards = f"""
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px;">
-    <div class="metric-card c-gray">
-        <div class="lbl">Clientes Totais</div>
-        <div class="val">{fmt_n(qtd_total)}</div>
-        <div class="desc">Base filtrada demograficamente</div>
-    </div>
-    <div class="metric-card c-purple">
-        <div class="lbl">Clientes Identificados</div>
-        <div class="val">{fmt_n(qtd_identificados)}</div>
-        <div class="desc">Com histórico de compra</div>
-    </div>
-    <div class="metric-card c-green">
-        <div class="lbl">Clientes Ativos (90 dias)</div>
-        <div class="val">{fmt_n(qtd_ativos)}</div>
-        <div class="desc">Compras no canal {canal}</div>
-    </div>
-    <div class="metric-card c-blue">
-        <div class="lbl">Novos Clientes</div>
-        <div class="val">{fmt_n(qtd_novos)}</div>
-        <div class="desc">1ª compra no período selecionado</div>
-    </div>
-    <div class="metric-card c-orange">
-        <div class="lbl">LTV Médio</div>
-        <div class="val">{fmt_b(ltv_medio)}</div>
-        <div class="desc">Receita total média por cliente</div>
-    </div>
-    <div class="metric-card c-purple">
-        <div class="lbl">Ticket Médio</div>
-        <div class="val">{fmt_b(ticket_medio)}</div>
-        <div class="desc">Gasto médio por transação</div>
-    </div>
+    <div class="metric-card c-gray"><div class="lbl">Clientes Totais</div><div class="val">{fmt_n(qtd_total)}</div><div class="desc">Base filtrada</div></div>
+    <div class="metric-card c-purple"><div class="lbl">Identificados</div><div class="val">{fmt_n(qtd_ident)}</div><div class="desc">Com histórico</div></div>
+    <div class="metric-card c-green"><div class="lbl">Ativos (90 dias)</div><div class="val">{fmt_n(qtd_ativos)}</div><div class="desc">Canal {canal}</div></div>
+    <div class="metric-card c-blue"><div class="lbl">Novos Clientes</div><div class="val">{fmt_n(qtd_novos)}</div><div class="desc">1ª compra no período</div></div>
+    <div class="metric-card c-orange"><div class="lbl">LTV Médio</div><div class="val">{fmt_b(ltv_medio)}</div><div class="desc">Receita por cliente</div></div>
+    <div class="metric-card c-purple"><div class="lbl">Ticket Médio</div><div class="val">{fmt_b(ticket_medio)}</div><div class="desc">Por transação</div></div>
 </div>
 """
 st.markdown(html_cards, unsafe_allow_html=True)

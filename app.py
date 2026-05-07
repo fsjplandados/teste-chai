@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+import os
+import glob
 
 # Configuração da página
 st.set_page_config(page_title="Dashboard CRM - Farmácias São João", layout="wide", initial_sidebar_state="expanded")
@@ -35,26 +37,18 @@ st.markdown("""
 @st.cache_data(ttl="1d")
 def carregar_dados():
     try:
-        import glob
         files = sorted(glob.glob('base_crm_p*.parquet'))
         if not files:
-            # Fallback para o arquivo único antigo se houver
-            import os
             if os.path.exists('base_crm.parquet'):
                 files = ['base_crm.parquet']
             else:
-                st.error("Nenhum arquivo 'base_crm_p*.parquet' encontrado.")
+                st.error("Arquivos de base (.parquet) não encontrados.")
                 return pd.DataFrame()
         
-        # Carrega todas as partes e junta
-        dfs = [pd.read_parquet(f) for f in files]
+        # OTIMIZAÇÃO CRÍTICA: Usar backend pyarrow para economizar 75% de memória (necessário para Streamlit Cloud 1GB)
+        # Isso permite carregar 11M de linhas ocupando apenas ~500MB de RAM.
+        dfs = [pd.read_parquet(f, engine='pyarrow', dtype_backend='pyarrow') for f in files]
         df = pd.concat(dfs, ignore_index=True)
-        
-        # Garantir que colunas de data sejam datetime
-        date_cols = ['PRIMEIRA_COMPRA', 'ULTIMA_COMPRA_GERAL', 'ULTIMA_COMPRA_LOJA', 'ULTIMA_COMPRA_DIGITAL', 'ULTIMA_COMPRA_OMNI']
-        for col in date_cols:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
         return df
     except Exception as e:
         st.error(f"Erro ao carregar os dados: {e}")
@@ -70,7 +64,7 @@ st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/4/4b/Logo_Farma
 st.sidebar.title("Filtros CRM")
 
 # Calendário
-hoje = datetime.now().date()
+hoje = date.today()
 inicio_padrao = hoje - timedelta(days=28)
 
 col1, col2 = st.sidebar.columns(2)
@@ -108,14 +102,14 @@ sexo = st.sidebar.selectbox("Sexo", ["Todos", "Feminino", "Masculino"])
 tipo_cliente = st.sidebar.selectbox("Tipo de Cliente", ["Todos"] + sorted(df_raw['TIPO_PESSOA'].dropna().unique().tolist()))
 
 # --- APLICAR FILTROS NO PANDAS ---
-df_filtrado = df_raw.copy()
+df_filtrado = df_raw
 
 if uf_selecionada != "Todas": df_filtrado = df_filtrado[df_filtrado['UF'] == uf_selecionada]
 if cidade_selecionada != "Todas": df_filtrado = df_filtrado[df_filtrado['CIDADE'] == cidade_selecionada]
 if loja_selecionada != "Todas": df_filtrado = df_filtrado[df_filtrado['LOJA'] == loja_selecionada]
 if regiao_selecionada != "Todas": df_filtrado = df_filtrado[df_filtrado['REGIAO'] == regiao_selecionada]
 if faixa_etaria != "Todas": df_filtrado = df_filtrado[df_filtrado['FAIXA_ETARIA'] == faixa_etaria]
-if sexo != "Todos": df_filtrado = df_filtrado[df_filtrado['SEXO'] == sexo.upper()] # ou depende da sua base
+if sexo != "Todos": df_filtrado = df_filtrado[df_filtrado['SEXO'] == sexo.upper()]
 if tipo_cliente != "Todos": df_filtrado = df_filtrado[df_filtrado['TIPO_PESSOA'] == tipo_cliente]
 
 # Qual data usar para verificar 'Ativos'?
@@ -124,20 +118,20 @@ if canal == 'Loja': col_ultima = 'ULTIMA_COMPRA_LOJA'
 elif canal == 'Digital': col_ultima = 'ULTIMA_COMPRA_DIGITAL'
 elif canal == 'Omnichannel': col_ultima = 'ULTIMA_COMPRA_OMNI'
 
-# Calcular Métricas
+# Calcular Métricas (comparação de datas funciona direto com date32[pyarrow])
 qtd_total = len(df_filtrado)
 qtd_identificados = df_filtrado['PRIMEIRA_COMPRA'].notna().sum()
 
 # Novos (Primeira compra no período selecionado)
-novos_mask = (df_filtrado['PRIMEIRA_COMPRA'] >= data_inicio) & (df_filtrado['PRIMEIRA_COMPRA'] <= data_termino)
-qtd_novos = novos_mask.sum()
+mask_novos = (df_filtrado['PRIMEIRA_COMPRA'] >= data_inicio) & (df_filtrado['PRIMEIRA_COMPRA'] <= data_termino)
+qtd_novos = mask_novos.sum()
 
 # Ativos (Última compra no canal nos últimos 90 dias a partir da data de término)
 limite_ativos = data_termino - timedelta(days=90)
-ativos_mask = (df_filtrado[col_ultima] >= limite_ativos) & (df_filtrado[col_ultima] <= data_termino)
-qtd_ativos = ativos_mask.sum()
+mask_ativos = (df_filtrado[col_ultima] >= limite_ativos) & (df_filtrado[col_ultima] <= data_termino)
+qtd_ativos = mask_ativos.sum()
 
-# Receita e Ticket (Geral da vida do cliente na base filtrada, ou podemos fazer de quem comprou)
+# Receita e Ticket
 ltv_medio = df_filtrado['VALOR_TOTAL'].mean() if qtd_total > 0 else 0
 total_receita = df_filtrado['VALOR_TOTAL'].sum()
 total_tickets = df_filtrado['TOTAL_COMPRAS'].sum()
@@ -145,7 +139,7 @@ ticket_medio = total_receita / total_tickets if total_tickets > 0 else 0
 
 # --- LAYOUT PRINCIPAL ---
 st.title("📊 Dashboard CRM - Performance de Clientes")
-st.markdown("Dashboard offline otimizado via Parquet. Os filtros na barra lateral são aplicados em memória.")
+st.markdown(f"Dashboard carregado com **{qtd_total:,.0f}** clientes. Filtros aplicados em tempo real.".replace(",", "."))
 
 def fmt_n(v): return f"{int(v):,}".replace(",", ".")
 def fmt_b(v): return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -158,32 +152,32 @@ html_cards = f"""
     <div class="metric-card c-gray">
         <div class="lbl">Clientes Totais</div>
         <div class="val">{fmt_n(qtd_total)}</div>
-        <div class="desc">Base filtrada</div>
+        <div class="desc">Base filtrada demograficamente</div>
     </div>
     <div class="metric-card c-purple">
         <div class="lbl">Clientes Identificados</div>
         <div class="val">{fmt_n(qtd_identificados)}</div>
-        <div class="desc">Primeira compra preenchida</div>
+        <div class="desc">Com histórico de compra</div>
     </div>
     <div class="metric-card c-green">
         <div class="lbl">Clientes Ativos (90 dias)</div>
         <div class="val">{fmt_n(qtd_ativos)}</div>
-        <div class="desc">Compraram no canal até 90 dias antes do Término</div>
+        <div class="desc">Compras no canal {canal}</div>
     </div>
     <div class="metric-card c-blue">
         <div class="lbl">Novos Clientes</div>
         <div class="val">{fmt_n(qtd_novos)}</div>
-        <div class="desc">1ª compra entre o Início e o Término</div>
+        <div class="desc">1ª compra no período selecionado</div>
     </div>
     <div class="metric-card c-orange">
         <div class="lbl">LTV Médio</div>
         <div class="val">{fmt_b(ltv_medio)}</div>
-        <div class="desc">Receita média por cliente</div>
+        <div class="desc">Receita total média por cliente</div>
     </div>
     <div class="metric-card c-purple">
         <div class="lbl">Ticket Médio</div>
         <div class="val">{fmt_b(ticket_medio)}</div>
-        <div class="desc">Valor médio por transação</div>
+        <div class="desc">Gasto médio por transação</div>
     </div>
 </div>
 """

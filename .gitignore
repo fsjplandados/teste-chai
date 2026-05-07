@@ -3,3 +3,5 @@
 !base_crm_p2.parquet
 test.parquet
 base_crm.parquet
+etl_parquet.py
+conexao_odbc.py

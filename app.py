@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import glob
+import os
 from datetime import date, timedelta
 
 # ─────────────────────────────────────────────────────────────
@@ -24,13 +25,9 @@ st.markdown("""
     --purple:#7C3AED; --sky:#0EA5E9; --green:#10B981; --orange:#F97316;
   }
   html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
-
-  /* ── Topbar ── */
   .crm-topbar { margin-bottom: 24px; }
   .crm-topbar h1 { font-size: 24px; font-weight: 800; color: var(--text-1); margin-bottom: 4px; }
   .crm-topbar .sub { font-size: 12px; color: var(--text-3); }
-
-  /* ── Cards ── */
   .grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -54,7 +51,6 @@ st.markdown("""
   .card.c-green::before  { background: linear-gradient(90deg, var(--green),  #34d399); }
   .card.c-blue::before   { background: linear-gradient(90deg, var(--sky),    #38bdf8); }
   .card.c-orange::before { background: linear-gradient(90deg, var(--orange), #fb923c); }
-
   .card-icon {
     width: 44px; height: 44px; border-radius: 12px;
     display: flex; align-items: center; justify-content: center;
@@ -66,11 +62,9 @@ st.markdown("""
   .bg-green  { background: var(--green);  }
   .bg-blue   { background: var(--sky);    }
   .bg-orange { background: var(--orange); }
-
   .card-label { font-size: 11px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 10px; }
   .card-value { font-size: 32px; font-weight: 800; color: var(--text-1); letter-spacing: -.03em; line-height: 1; margin-bottom: 12px; }
   .card-desc  { font-size: 12px; color: var(--text-3); line-height: 1.5; }
-
   @media(max-width:900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
   @media(max-width:600px) { .grid { grid-template-columns: 1fr; } }
 </style>
@@ -78,52 +72,57 @@ st.markdown("""
 
 
 # ─────────────────────────────────────────────────────────────
-# CARREGAMENTO DE DADOS — usando pandas puro (sem DuckDB)
-# As colunas de data são do tipo datetime.date (nativo Python)
-# ao serem lidas do Parquet, o que permite comparação direta.
+# PATH ABSOLUTO — resolve o problema do Streamlit Cloud
+# No Cloud, o CWD pode ser diferente de onde está o app.py.
+# Usando __file__ garantimos o path correto.
+# ─────────────────────────────────────────────────────────────
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+# ─────────────────────────────────────────────────────────────
+# CARREGAMENTO DE DADOS
+# dtype_backend='pyarrow' usa ~260 MB por arquivo (vs 1.1 GB sem ele).
+# Para 2 arquivos: ~520 MB total — dentro do limite de 1 GB do Cloud.
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl="1d", show_spinner="Carregando base de clientes…")
 def carregar_dados():
-    files = sorted(glob.glob("base_crm_p*.parquet"))
+    pattern = os.path.join(BASE_DIR, "base_crm_p*.parquet")
+    files = sorted(glob.glob(pattern))
     if not files:
-        return pd.DataFrame()
+        return pd.DataFrame(), []
+
     dfs = []
     for f in files:
-        dfs.append(pd.read_parquet(f, engine="pyarrow"))
+        dfs.append(
+            pd.read_parquet(f, engine="pyarrow", dtype_backend="pyarrow")
+        )
     df = pd.concat(dfs, ignore_index=True)
-    # Garantir que colunas de data sejam datetime.date (não string)
-    date_cols = [
-        "PRIMEIRA_COMPRA", "ULTIMA_COMPRA_GERAL",
-        "ULTIMA_COMPRA_LOJA", "ULTIMA_COMPRA_DIGITAL", "ULTIMA_COMPRA_OMNI",
-    ]
-    for c in date_cols:
-        if c in df.columns:
-            df[c] = pd.to_datetime(df[c], errors="coerce").dt.date
-    return df
+    return df, files
 
 
-df = carregar_dados()
+df, arquivos_carregados = carregar_dados()
 
 if df.empty:
-    st.error("❌ Nenhum arquivo base_crm_p*.parquet encontrado. Verifique se os arquivos estão no repositório.")
+    st.error("❌ Nenhum arquivo base_crm_p*.parquet encontrado.")
     st.stop()
 
+
 # ─────────────────────────────────────────────────────────────
-# LOOKUP TABLE — apenas colunas categóricas (economiza RAM)
+# LOOKUP TABLE — apenas colunas categóricas para os filtros
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl="1d")
 def build_lookup(_df):
     return (
         _df[["UF", "CIDADE", "LOJA", "REGIAO", "SEXO", "TIPO_PESSOA"]]
         .drop_duplicates()
-        .dropna(subset=["UF"])
+        .to_pandas()           # converte ArrowDtype → pandas nativo para opções de filtro
     )
 
 lkp = build_lookup(df)
 
 
 def opts(col, filter_col=None, filter_val=None):
-    """Retorna lista de opções para um selectbox, com cascata."""
+    """Lista de opções para selectbox, com cascata."""
     base = lkp
     if filter_col and filter_val and filter_val not in ("Todas", "Todos"):
         base = base[base[filter_col] == filter_val]
@@ -141,7 +140,6 @@ with st.sidebar:
     )
     st.title("Filtros CRM")
 
-    # Datas
     c1, c2 = st.columns(2)
     dt_inicio = c1.date_input("Data Início", value=date(2025, 1, 1))
     dt_fim    = c2.date_input("Data Término", value=date.today())
@@ -155,7 +153,8 @@ with st.sidebar:
     cid_sel = st.selectbox("Cidade da Loja", opts("CIDADE", "UF", uf_sel))
     loj_sel = st.selectbox(
         "Loja",
-        opts("LOJA", "CIDADE", cid_sel) if cid_sel != "Todas" else opts("LOJA", "UF", uf_sel),
+        opts("LOJA", "CIDADE", cid_sel) if cid_sel != "Todas"
+        else opts("LOJA", "UF", uf_sel),
     )
     reg_sel   = st.selectbox("Região", opts("REGIAO"))
     faixa_sel = st.selectbox(
@@ -171,45 +170,46 @@ with st.sidebar:
 
 
 # ─────────────────────────────────────────────────────────────
-# FILTRAGEM — máscara booleana (zero cópias do DF inteiro)
+# FILTRAGEM — máscara booleana (zero cópias do DF completo)
+# Com dtype_backend='pyarrow', a comparação com date() funciona
+# porque o pyarrow reconhece date32[day] == datetime.date.
 # ─────────────────────────────────────────────────────────────
 mask = pd.Series(True, index=df.index)
 
-if uf_sel   != "Todas": mask &= df["UF"]   == uf_sel
-if cid_sel  != "Todas": mask &= df["CIDADE"] == cid_sel
-if loj_sel  != "Todas": mask &= df["LOJA"]  == loj_sel
-if reg_sel  != "Todas": mask &= df["REGIAO"] == reg_sel
+if uf_sel   != "Todas": mask &= df["UF"]         == uf_sel
+if cid_sel  != "Todas": mask &= df["CIDADE"]     == cid_sel
+if loj_sel  != "Todas": mask &= df["LOJA"]       == loj_sel
+if reg_sel  != "Todas": mask &= df["REGIAO"]     == reg_sel
 if faixa_sel != "Todas": mask &= df["FAIXA_ETARIA"] == faixa_sel
-if sexo_sel  != "Todos": mask &= df["SEXO"] == sexo_sel
+if sexo_sel  != "Todos": mask &= df["SEXO"]      == sexo_sel
 if tipo_sel  != "Todos": mask &= df["TIPO_PESSOA"] == tipo_sel
 
-# Coluna de última compra conforme o canal
 col_ultima = {
     "Loja": "ULTIMA_COMPRA_LOJA",
     "Digital": "ULTIMA_COMPRA_DIGITAL",
     "Omnichannel": "ULTIMA_COMPRA_OMNI",
 }.get(canal, "ULTIMA_COMPRA_GERAL")
 
+
 # ─────────────────────────────────────────────────────────────
-# MÉTRICAS — calculadas sobre a máscara (sem alocar DF novo)
+# MÉTRICAS — usando loc[mask, coluna] para não alocar cópia
 # ─────────────────────────────────────────────────────────────
 qtd_total = int(mask.sum())
 
 if qtd_total > 0:
     limite_ativos = dt_fim - timedelta(days=90)
 
-    qtd_ident  = int(df.loc[mask, "PRIMEIRA_COMPRA"].notna().sum())
-    qtd_novos  = int(
-        ((df.loc[mask, "PRIMEIRA_COMPRA"] >= dt_inicio) &
-         (df.loc[mask, "PRIMEIRA_COMPRA"] <= dt_fim)).sum()
-    )
-    qtd_ativos = int(
-        ((df.loc[mask, col_ultima] >= limite_ativos) &
-         (df.loc[mask, col_ultima] <= dt_fim)).sum()
-    )
-    ltv_medio    = float(df.loc[mask, "VALOR_TOTAL"].mean())
-    total_receita = float(df.loc[mask, "VALOR_TOTAL"].sum())
-    total_tickets = float(df.loc[mask, "TOTAL_COMPRAS"].sum())
+    pc = df.loc[mask, "PRIMEIRA_COMPRA"]
+    uc = df.loc[mask, col_ultima]
+    vt = df.loc[mask, "VALOR_TOTAL"]
+    tc = df.loc[mask, "TOTAL_COMPRAS"]
+
+    qtd_ident  = int(pc.notna().sum())
+    qtd_novos  = int(((pc >= dt_inicio) & (pc <= dt_fim)).sum())
+    qtd_ativos = int(((uc >= limite_ativos) & (uc <= dt_fim)).sum())
+    ltv_medio    = float(vt.mean())
+    total_receita = float(vt.sum())
+    total_tickets = float(tc.sum())
     ticket_medio  = total_receita / total_tickets if total_tickets else 0.0
 else:
     qtd_ident = qtd_novos = qtd_ativos = 0
@@ -223,20 +223,19 @@ def fmt_n(v):
     return f"{int(v or 0):,}".replace(",", ".")
 
 def fmt_br(v):
-    s = f"{float(v or 0):,.2f}"       # 1,234.56
-    s = s.replace(",", "X").replace(".", ",").replace("X", ".")  # 1.234,56
+    s = f"{float(v or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return "R$ " + s
 
 
 # ─────────────────────────────────────────────────────────────
-# LAYOUT PRINCIPAL — idêntico ao design do crm.html
+# LAYOUT PRINCIPAL — design idêntico ao crm.html
 # ─────────────────────────────────────────────────────────────
-n_files = len(glob.glob("base_crm_p*.parquet"))
+n_files = len(arquivos_carregados)
 
 st.markdown(f"""
 <div class="crm-topbar">
   <h1>Dashboard CRM</h1>
-  <p class="sub">{n_files} arquivo(s) carregado(s) · {fmt_n(qtd_total)} clientes na seleção</p>
+  <p class="sub">{n_files} arquivo(s) · {fmt_n(qtd_total)} clientes na seleção</p>
 </div>
 """, unsafe_allow_html=True)
 

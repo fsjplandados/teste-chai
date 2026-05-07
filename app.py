@@ -4,6 +4,7 @@ import duckdb
 import glob
 import os
 from datetime import date, timedelta
+from dateutil.relativedelta import relativedelta
 
 # ─────────────────────────────────────────────────────────────
 # CONFIGURAÇÃO E DESIGN SYSTEM
@@ -55,7 +56,7 @@ st.markdown("""
     .nav-item.active { background: rgba(255,255,255,0.2); color: #fff; }
     .nav-item svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; }
 
-    /* Barra de Filtros */
+    /* Barra de Filtros Inteligente */
     div[data-testid="stForm"] {
         background: #fff !important; border: 1px solid var(--border) !important;
         border-radius: 16px !important; padding: 24px 32px !important;
@@ -68,7 +69,7 @@ st.markdown("""
     }
     .filter-section-title {
         font-size: 13px; font-weight: 700; color: var(--text-1);
-        margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+        margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;
     }
 
     /* Cards e Deltas */
@@ -95,16 +96,12 @@ st.markdown("""
     .delta.up { background: rgba(16, 185, 129, 0.1); color: var(--green); }
     .delta.down { background: rgba(239, 68, 68, 0.1); color: var(--red); }
 
-    /* Cores */
-    .c-gray::before { background: var(--text-3); } .c-purple::before { background: var(--purple); }
-    .c-green::before { background: var(--green); } .c-blue::before { background: var(--sky); }
-    .c-orange::before { background: var(--orange); }
-
     /* Botão */
     div[data-testid="stForm"] button {
         background-color: var(--blue) !important; color: white !important;
         border-radius: 10px !important; padding: 12px 24px !important;
         font-weight: 700 !important; width: 100% !important; margin-top: 10px !important;
+        box-shadow: 0 4px 12px rgba(0,110,255,0.2) !important;
     }
 </style>
 
@@ -128,7 +125,7 @@ con = get_con()
 
 @st.cache_data(ttl="1d")
 def carregar_lookup(files: tuple):
-    return con.execute("SELECT DISTINCT UF, CIDADE, LOJA, REGIAO, SEXO, TIPO_PESSOA FROM read_parquet(?) WHERE UF IS NOT NULL", [list(files)]).df()
+    return con.execute("SELECT DISTINCT UF, CIDADE, SEXO, TIPO_PESSOA FROM read_parquet(?) WHERE UF IS NOT NULL", [list(files)]).df()
 
 lkp = carregar_lookup(tuple(PARQUET_FILES))
 
@@ -137,25 +134,37 @@ def opts(col, by=None, val=None):
     return ["Todas"] + sorted(base[col].dropna().unique().tolist())
 
 # ─────────────────────────────────────────────────────────────
-# INTERFACE - FILTROS COM CALENDÁRIOS INDEPENDENTES
+# INTERFACE - COMPARATIVO INTELIGENTE
 # ─────────────────────────────────────────────────────────────
 st.markdown('<div style="font-size:24px; font-weight:800; color:#111827; margin-bottom:20px;">Dashboard CRM</div>', unsafe_allow_html=True)
 
 with st.form("filtros_form"):
-    # Seção 1: Períodos (Lado a Lado)
-    st.markdown('<div class="filter-section-title">📅 Seleção de Períodos</div>', unsafe_allow_html=True)
-    cp1, cp2 = st.columns(2)
+    st.markdown('<div class="filter-section-title">📅 Período e Comparação</div>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1.5, 1.5, 1])
     
     hoje = date.today()
-    # Período Principal
-    range_principal = cp1.date_input("Período Principal (Intervalo)", value=(hoje - timedelta(days=28), hoje))
-    # Comparar com
-    range_comparacao = cp2.date_input("Comparar com (Intervalo)", value=(hoje - timedelta(days=57), hoje - timedelta(days=29)))
-
-    # Seção 2: Filtros de Negócio
-    st.markdown('<div style="margin-top:16px;" class="filter-section-title">🔍 Filtros de Segmentação</div>', unsafe_allow_html=True)
-    f1, f2, f3, f4, f5, f6 = st.columns([1, 0.8, 1.2, 0.8, 0.8, 0.6])
+    # 1. Seleção Principal (Calendário Interativo)
+    periodo_range = c1.date_input("Período Principal", value=(hoje - timedelta(days=28), hoje))
     
+    # Extração de datas e lógica de sugestão
+    if isinstance(periodo_range, (list, tuple)) and len(periodo_range) == 2:
+        dt_ini_p, dt_fim_p = periodo_range
+        is_intervalo = dt_ini_p != dt_fim_p
+    else:
+        dt_ini_p = dt_fim_p = periodo_range[0] if isinstance(periodo_range, (list, tuple)) else periodo_range
+        is_intervalo = False
+
+    # 2. Comparativo Inteligente Automático
+    if not is_intervalo:
+        opcoes_comp = ["Ontem", "7 dias atrás", "Mês anterior", "Ano anterior", "Sem comparação"]
+    else:
+        opcoes_comp = ["Período anterior", "Mês anterior", "Ano anterior", "Sem comparação"]
+    
+    comparar_com = c2.selectbox("Comparativo Sugerido", opcoes_comp)
+    
+    # Filtros de Segmentação
+    st.markdown('<div style="margin-top:20px;" class="filter-section-title">🔍 Segmentação</div>', unsafe_allow_html=True)
+    f1, f2, f3, f4, f5, f6 = st.columns([1, 0.8, 1.2, 0.8, 0.8, 0.5])
     canal  = f1.selectbox("Canal", ["Total", "Loja", "Digital", "Omnichannel"])
     uf_sel = f2.selectbox("UF", opts("UF"))
     cid_sel = f3.selectbox("Cidade", opts("CIDADE", "UF", uf_sel))
@@ -163,19 +172,26 @@ with st.form("filtros_form"):
     tipo_sel = f5.selectbox("Tipo Cliente", opts("TIPO_PESSOA"))
     btn = f6.form_submit_button("Aplicar")
 
-# Lógica de extração de datas
-def get_dates(r):
-    if isinstance(r, (list, tuple)) and len(r) == 2: return r[0], r[1]
-    return r[0], r[0] if isinstance(r, (list, tuple)) else (r, r)
+# Lógica de cálculo das datas de comparação baseada na sugestão inteligente
+dias_p = (dt_fim_p - dt_ini_p).days + 1
+dt_ini_c = dt_fim_c = None
 
-dt_ini_p, dt_fim_p = get_dates(range_principal)
-dt_ini_c, dt_fim_c = get_dates(range_comparacao)
+if comparar_com == "Ontem":
+    dt_ini_c = dt_fim_c = hoje - timedelta(days=1)
+elif comparar_com == "7 dias atrás":
+    dt_ini_c = dt_fim_c = dt_ini_p - timedelta(days=7)
+elif comparar_com == "Período anterior":
+    dt_ini_c, dt_fim_c = dt_ini_p - timedelta(days=dias_p), dt_ini_p - timedelta(days=1)
+elif comparar_com == "Mês anterior":
+    dt_ini_c, dt_fim_c = dt_ini_p - relativedelta(months=1), dt_fim_p - relativedelta(months=1)
+elif comparar_com == "Ano anterior":
+    dt_ini_c, dt_fim_c = dt_ini_p - relativedelta(years=1), dt_fim_p - relativedelta(years=1)
 
 # ─────────────────────────────────────────────────────────────
 # CÁLCULOS
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
-def calcular_metrics(files, uf, cid, loj, reg, sexo, tipo, canal, d_i, d_f):
+def calcular_metrics(files, uf, cid, sexo, tipo, canal, d_i, d_f):
     if not d_i or not d_f: return [0,0,0,0,0,0]
     col_u = {"Loja": "ULTIMA_COMPRA_LOJA", "Digital": "ULTIMA_COMPRA_DIGITAL", "Omnichannel": "ULTIMA_COMPRA_OMNI"}.get(canal, "ULTIMA_COMPRA_GERAL")
     conds, params = [f"{col_u} BETWEEN ? AND ?"], [list(files), d_i.strftime("%Y-%m-%d"), d_f.strftime("%Y-%m-%d")]
@@ -193,8 +209,8 @@ def calcular_metrics(files, uf, cid, loj, reg, sexo, tipo, canal, d_i, d_f):
     """
     return con.execute(sql, params).fetchone()
 
-m_at = calcular_metrics(tuple(PARQUET_FILES), uf_sel, cid_sel, "Todas", "Todas", sexo_sel, tipo_sel, canal, dt_ini_p, dt_fim_p)
-m_ant = calcular_metrics(tuple(PARQUET_FILES), uf_sel, cid_sel, "Todas", "Todas", sexo_sel, tipo_sel, canal, dt_ini_c, dt_fim_c)
+m_at = calcular_metrics(tuple(PARQUET_FILES), uf_sel, cid_sel, sexo_sel, tipo_sel, canal, dt_ini_p, dt_fim_p)
+m_ant = calcular_metrics(tuple(PARQUET_FILES), uf_sel, cid_sel, sexo_sel, tipo_sel, canal, dt_ini_c, dt_fim_c)
 
 # ─────────────────────────────────────────────────────────────
 # UI - EXIBIÇÃO
@@ -207,15 +223,18 @@ def card(label, val, prev_val, is_currency=False, color_class="c-gray", icon_svg
     fmt_v = (f"R$ {val:,.2f}" if is_currency else f"{int(val):,}")
     fmt_v = fmt_v.replace(",", "X").replace(".", ",").replace("X", ".")
     
+    delta_html = f'<div class="delta {delta_class}">{delta_icon} {abs(diff):.1f}%</div>' if dt_ini_c else ""
+    desc_txt = f"vs. {comparar_com.lower()}" if dt_ini_c else ""
+    
     st.markdown(f"""
     <div class="kpi-card {color_class}">
         <div class="kpi-icon" style="background:var(--{color_class.split('-')[1]})">{icon_svg}</div>
         <div class="kpi-label">{label}</div>
         <div class="kpi-value-container">
             <div class="kpi-value">{fmt_v}</div>
-            <div class="delta {delta_class}">{delta_icon} {abs(diff):.1f}%</div>
+            {delta_html}
         </div>
-        <div class="kpi-desc">vs. período de comparação</div>
+        <div class="kpi-desc" style="font-size:10px; color:var(--text-3); font-weight:500;">{desc_txt}</div>
     </div>
     """, unsafe_allow_html=True)
 

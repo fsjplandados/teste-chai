@@ -91,13 +91,13 @@ tipo_cliente = st.sidebar.selectbox("Tipo de Cliente", get_opts('TIPO_PESSOA'))
 def calcular_metricas():
     # Construindo a cláusula WHERE dinamicamente
     where_clauses = ["1=1"]
-    if uf_sel != "Todas": where_clauses.append(f"UF = '{uf_sel}'")
-    if cid_sel != "Todas": where_clauses.append(f"CIDADE = '{cid_sel}'")
-    if loj_sel != "Todas": where_clauses.append(f"LOJA = '{loj_sel}'")
-    if reg_sel != "Todas": where_clauses.append(f"REGIAO = '{reg_sel}'")
-    if faixa_etaria != "Todas": where_clauses.append(f"FAIXA_ETARIA = '{faixa_etaria}'")
-    if sexo != "Todos": where_clauses.append(f"SEXO = '{sexo[0].upper()}'")
-    if tipo_cliente != "Todos": where_clauses.append(f"TIPO_PESSOA = '{tipo_cliente}'")
+    if uf_sel != "Todas": where_clauses.append(f"UF = '{uf_sel.replace(\"'\", \"''\")}'")
+    if cid_sel != "Todas": where_clauses.append(f"CIDADE = '{cid_sel.replace(\"'\", \"''\")}'")
+    if loj_sel != "Todas": where_clauses.append(f"LOJA = '{loj_sel.replace(\"'\", \"''\")}'")
+    if reg_sel != "Todas": where_clauses.append(f"REGIAO = '{reg_sel.replace(\"'\", \"''\")}'")
+    if faixa_etaria != "Todas": where_clauses.append(f"FAIXA_ETARIA = '{faixa_etaria.replace(\"'\", \"''\")}'")
+    if sexo != "Todos": where_clauses.append(f"SEXO = '{sexo.replace(\"'\", \"''\")}'")
+    if tipo_cliente != "Todos": where_clauses.append(f"TIPO_PESSOA = '{tipo_cliente.replace(\"'\", \"''\")}'")
     
     where_str = " AND ".join(where_clauses)
     

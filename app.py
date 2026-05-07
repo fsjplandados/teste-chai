@@ -4,6 +4,7 @@ import duckdb
 import glob
 import os
 from datetime import date, timedelta
+from dateutil.relativedelta import relativedelta
 
 # ─────────────────────────────────────────────────────────────
 # CONFIGURAÇÃO E DESIGN SYSTEM
@@ -58,7 +59,7 @@ st.markdown("""
     /* Barra de Filtros */
     div[data-testid="stForm"] {
         background: #fff !important; border: 1px solid var(--border) !important;
-        border-radius: 16px !important; padding: 20px 32px !important;
+        border-radius: 16px !important; padding: 24px 32px !important;
         margin-bottom: 32px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
     .stSelectbox label, .stDateInput label {
@@ -101,6 +102,7 @@ st.markdown("""
         background-color: var(--blue) !important; color: white !important;
         border-radius: 10px !important; padding: 10px 24px !important;
         font-weight: 700 !important; width: 100% !important; margin-top: 22px !important;
+        box-shadow: 0 4px 12px rgba(0,110,255,0.2) !important;
     }
 </style>
 
@@ -133,47 +135,74 @@ def opts(col, by=None, val=None):
     return ["Todas"] + sorted(base[col].dropna().unique().tolist())
 
 # ─────────────────────────────────────────────────────────────
-# INTERFACE - FILTROS UNIFICADOS
+# INTERFACE - FILTROS INTELIGENTES
 # ─────────────────────────────────────────────────────────────
 st.markdown('<div style="font-size:24px; font-weight:800; color:#111827; margin-bottom:20px;">Dashboard CRM</div>', unsafe_allow_html=True)
 
 with st.form("filtros_form"):
-    c1, c2, c3, c4 = st.columns([1.5, 0.8, 0.6, 1.2])
-    # Filtro de Data Único (Intervalo)
+    c1, c2, c3, c4 = st.columns([1.5, 1.2, 0.6, 1.2])
+    
+    # Seletor de Período Pré-definido
     hoje = date.today()
-    periodo = c1.date_input("Período de Análise", value=(hoje - timedelta(days=28), hoje))
-    canal  = c2.selectbox("Canal", ["Total", "Loja", "Digital", "Omnichannel"])
+    opcoes_periodo = [
+        "Últimos 7 dias", "Últimos 28 dias", "Últimos 90 dias", 
+        "Hoje", "Ontem", "Este Mês", "Mês Anterior", "Personalizado"
+    ]
+    periodo_pref = c1.selectbox("Período Principal", opcoes_periodo, index=1)
+    
+    # Comparar com...
+    comp_opcoes = ["Período anterior", "Ano anterior", "Sem comparação"]
+    comparar_com = c2.selectbox("Comparar com", comp_opcoes, index=0)
+    
     uf_sel = c3.selectbox("UF", opts("UF"))
     cid_sel = c4.selectbox("Cidade", opts("CIDADE", "UF", uf_sel))
 
-    c5, c6, c7, c8, c9, c10 = st.columns([1.4, 0.8, 1, 0.8, 0.8, 0.5])
-    loj_sel = c5.selectbox("Loja", opts("LOJA", "CIDADE", cid_sel) if cid_sel != "Todas" else opts("LOJA", "UF", uf_sel))
-    reg_sel = c6.selectbox("Região", opts("REGIAO"))
-    faixa_sel = c7.selectbox("Faixa Etária", ["Todas", "Menor de 24", "Entre 25 e 34", "Entre 35 e 44", "Entre 45 e 54", "Entre 55 e 64", "Mais de 65"])
+    # Se "Personalizado", mostra os inputs de data
+    if periodo_pref == "Personalizado":
+        cp1, cp2, _ = st.columns([1, 1, 2])
+        dt_ini_c = cp1.date_input("Data de início", value=hoje - timedelta(days=28))
+        dt_fim_c = cp2.date_input("Data de término", value=hoje)
+    else:
+        # Lógica para períodos pré-definidos
+        if periodo_pref == "Hoje": dt_ini_c, dt_fim_c = hoje, hoje
+        elif periodo_pref == "Ontem": dt_ini_c, dt_fim_c = hoje - timedelta(days=1), hoje - timedelta(days=1)
+        elif periodo_pref == "Últimos 7 dias": dt_ini_c, dt_fim_c = hoje - timedelta(days=7), hoje - timedelta(days=1)
+        elif periodo_pref == "Últimos 28 dias": dt_ini_c, dt_fim_c = hoje - timedelta(days=28), hoje - timedelta(days=1)
+        elif periodo_pref == "Últimos 90 dias": dt_ini_c, dt_fim_c = hoje - timedelta(days=90), hoje - timedelta(days=1)
+        elif periodo_pref == "Este Mês": dt_ini_c, dt_fim_c = hoje.replace(day=1), hoje
+        elif periodo_pref == "Mês Anterior":
+            fim_m_ant = hoje.replace(day=1) - timedelta(days=1)
+            dt_ini_c, dt_fim_c = fim_m_ant.replace(day=1), fim_m_ant
+
+    c5, c6, c7, c8, c9, c10 = st.columns([1.4, 1.2, 1, 0.8, 0.8, 0.5])
+    canal  = c5.selectbox("Canal", ["Total", "Loja", "Digital", "Omnichannel"])
+    loj_sel = c6.selectbox("Loja", opts("LOJA", "CIDADE", cid_sel) if cid_sel != "Todas" else opts("LOJA", "UF", uf_sel))
+    reg_sel = c7.selectbox("Região", opts("REGIAO"))
     sexo_sel = c8.selectbox("Sexo", opts("SEXO"))
     tipo_sel = c9.selectbox("Tipo Cliente", opts("TIPO_PESSOA"))
-    btn = c10.form_submit_button("Filtrar")
+    btn = c10.form_submit_button("Aplicar")
 
-# Lógica de datas do intervalo
-if len(periodo) == 2:
-    dt_ini, dt_fim = periodo
-    dias = (dt_fim - dt_ini).days + 1
-    dt_ini_prev, dt_fim_prev = dt_ini - timedelta(days=dias), dt_ini - timedelta(days=1)
+# Cálculo das datas de comparação
+dias_diff = (dt_fim_c - dt_ini_c).days + 1
+if comparar_com == "Período anterior":
+    dt_ini_ant, dt_fim_ant = dt_ini_c - timedelta(days=dias_diff), dt_ini_c - timedelta(days=1)
+elif comparar_com == "Ano anterior":
+    dt_ini_ant, dt_fim_ant = dt_ini_c - relativedelta(years=1), dt_fim_c - relativedelta(years=1)
 else:
-    dt_ini = dt_fim = periodo[0]
-    dt_ini_prev = dt_fim_prev = dt_ini - timedelta(days=1)
+    dt_ini_ant, dt_fim_ant = None, None
 
 # ─────────────────────────────────────────────────────────────
-# CÁLCULOS COM COMPARAÇÃO
+# CÁLCULOS
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
-def calcular_metrics(files, uf, cid, loj, reg, faixa, sexo, tipo, canal, d_i, d_f):
+def calcular_metrics(files, uf, cid, loj, reg, sexo, tipo, canal, d_i, d_f):
+    if not d_i or not d_f: return [0,0,0,0,0,0]
     col_u = {"Loja": "ULTIMA_COMPRA_LOJA", "Digital": "ULTIMA_COMPRA_DIGITAL", "Omnichannel": "ULTIMA_COMPRA_OMNI"}.get(canal, "ULTIMA_COMPRA_GERAL")
     conds, params = [f"{col_u} BETWEEN ? AND ?"], [list(files), d_i.strftime("%Y-%m-%d"), d_f.strftime("%Y-%m-%d")]
     def add(col, v):
         if v != "Todas": conds.append(f"{col} = ?"); params.append(v)
     add("UF", uf); add("CIDADE", cid); add("LOJA", loj)
-    add("REGIAO", reg); add("FAIXA_ETARIA", faixa); add("SEXO", sexo); add("TIPO_PESSOA", tipo)
+    add("REGIAO", reg); add("SEXO", sexo); add("TIPO_PESSOA", tipo)
     
     lim_ativos = d_f - timedelta(days=90)
     sql = f"""
@@ -185,12 +214,11 @@ def calcular_metrics(files, uf, cid, loj, reg, faixa, sexo, tipo, canal, d_i, d_
     """
     return con.execute(sql, params).fetchone()
 
-# Busca períodos Atual e Anterior
-m_at = calcular_metrics(tuple(PARQUET_FILES), uf_sel, cid_sel, loj_sel, reg_sel, faixa_sel, sexo_sel, tipo_sel, canal, dt_ini, dt_fim)
-m_ant = calcular_metrics(tuple(PARQUET_FILES), uf_sel, cid_sel, loj_sel, reg_sel, faixa_sel, sexo_sel, tipo_sel, canal, dt_ini_prev, dt_fim_prev)
+m_at = calcular_metrics(tuple(PARQUET_FILES), uf_sel, cid_sel, loj_sel, reg_sel, sexo_sel, tipo_sel, canal, dt_ini_c, dt_fim_c)
+m_ant = calcular_metrics(tuple(PARQUET_FILES), uf_sel, cid_sel, loj_sel, reg_sel, sexo_sel, tipo_sel, canal, dt_ini_ant, dt_fim_ant)
 
 # ─────────────────────────────────────────────────────────────
-# UI - EXIBIÇÃO COM DELTAS
+# UI - EXIBIÇÃO
 # ─────────────────────────────────────────────────────────────
 def card(label, val, prev_val, is_currency=False, color_class="c-gray", icon_svg=""):
     diff = ((val / prev_val) - 1) * 100 if prev_val and prev_val > 0 else 0
@@ -200,19 +228,23 @@ def card(label, val, prev_val, is_currency=False, color_class="c-gray", icon_svg
     fmt_v = (f"R$ {val:,.2f}" if is_currency else f"{int(val):,}")
     fmt_v = fmt_v.replace(",", "X").replace(".", ",").replace("X", ".")
     
+    comp_txt = "vs. período anterior" if comparar_com == "Período anterior" else "vs. ano anterior"
+    if comparar_com == "Sem comparação": delta_html = ""
+    else: delta_html = f'<div class="delta {delta_class}">{delta_icon} {abs(diff):.1f}%</div>'
+    
     st.markdown(f"""
     <div class="kpi-card {color_class}">
         <div class="kpi-icon" style="background:var(--{color_class.split('-')[1]})">{icon_svg}</div>
         <div class="kpi-label">{label}</div>
         <div class="kpi-value-container">
             <div class="kpi-value">{fmt_v}</div>
-            <div class="delta {delta_class}">{delta_icon} {abs(diff):.1f}%</div>
+            {delta_html}
         </div>
-        <div class="kpi-desc">vs. período anterior</div>
+        <div class="kpi-desc">{comp_txt if comparar_com != "Sem comparação" else ""}</div>
     </div>
     """, unsafe_allow_html=True)
 
-# Ícones SVG
+# Ícones
 i_user = '<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
 i_ident = '<svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
 i_pulse = '<svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
@@ -224,9 +256,7 @@ c1, c2, c3 = st.columns(3)
 with c1: card("Clientes Totais", m_at[0], m_ant[0], False, "c-gray", i_user)
 with c2: card("Identificados", m_at[1], m_ant[1], False, "c-purple", i_ident)
 with c3: card("Clientes Ativos", m_at[3], m_ant[3], False, "c-green", i_pulse)
-
-st.write("") # Espaçamento
-
+st.write("")
 c4, c5, c6 = st.columns(3)
 with c4: card("Novos Clientes", m_at[2], m_ant[2], False, "c-blue", i_plus)
 with c5: card("LTV Médio", m_at[4], m_ant[4], True, "c-orange", i_money)

@@ -28,19 +28,19 @@ st.markdown("""
     .stApp { background-color: var(--bg) !important; font-family: 'Inter', sans-serif !important; }
     [data-testid="stSidebar"], [data-testid="stHeader"], [data-testid="stDecoration"] { display: none !important; }
     
-    .main .block-container {
+    /* Força o recuo em todos os containers principais do Streamlit */
+    [data-testid="stAppViewContainer"], [data-testid="stMainViewContainer"], .main .block-container {
         padding-left: 150px !important;
         padding-right: 48px !important;
         padding-top: 36px !important;
-        max-width: 100% !important;
     }
 
     /* Sidebar Azul */
     .crm-sidebar {
-        width: 80px; height: 100vh; background: var(--blue);
+        width: 100px; height: 100vh; background: var(--blue);
         position: fixed; top: 0; left: 0;
         display: flex; flex-direction: column; align-items: center;
-        padding: 24px 0; z-index: 9999;
+        padding: 24px 0; z-index: 99999;
         box-shadow: 4px 0 24px rgba(0,110,255,0.18);
     }
     .logo-circle {

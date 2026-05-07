@@ -59,23 +59,17 @@ st.markdown("""
 
 # ─────────────────────────────────────────────────────────────
 # LOCALIZAÇÃO DOS ARQUIVOS
-# Usando __file__ para garantir o path absoluto no Streamlit Cloud
 # ─────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PARQUET_FILES = sorted(glob.glob(os.path.join(BASE_DIR, "base_crm_p*.parquet")))
-# Normaliza separadores (importante para DuckDB no Linux)
 PARQUET_FILES = [f.replace("\\", "/") for f in PARQUET_FILES]
 
 if not PARQUET_FILES:
-    st.error("❌ Nenhum arquivo base_crm_p*.parquet encontrado em: " + BASE_DIR)
+    st.error("❌ Nenhum arquivo base_crm_p*.parquet encontrado.")
     st.stop()
 
 # ─────────────────────────────────────────────────────────────
 # CONEXÃO DUCKDB
-# Testado localmente: COUNT(*) = 11.358.686 com <100MB de RAM.
-# DuckDB lê parquet em streaming — nunca carrega tudo na RAM.
-# Usa parameter binding (?-syntax) para evitar injeção e problemas
-# de path com espaços e caracteres especiais.
 # ─────────────────────────────────────────────────────────────
 @st.cache_resource
 def get_con(_files):
@@ -84,20 +78,18 @@ def get_con(_files):
 con = get_con(tuple(PARQUET_FILES))
 
 # ─────────────────────────────────────────────────────────────
-# LOOKUP TABLE — valores únicos para os filtros
-# DuckDB faz DISTINCT instantaneamente via streaming
+# LOOKUP TABLE
 # ─────────────────────────────────────────────────────────────
-@st.cache_data(ttl="1d", show_spinner="Carregando opções de filtro…")
+@st.cache_data(ttl="1d", show_spinner="Carregando filtros…")
 def carregar_lookup(files: tuple):
     sql = """
         SELECT DISTINCT UF, CIDADE, LOJA, REGIAO, SEXO, TIPO_PESSOA
         FROM read_parquet(?)
         WHERE UF IS NOT NULL
     """
-    return duckdb.execute(sql, [list(files)]).df()
+    return con.execute(sql, [list(files)]).df()
 
 lkp = carregar_lookup(tuple(PARQUET_FILES))
-
 
 def opts(col, filter_col=None, filter_val=None):
     base = lkp
@@ -106,194 +98,78 @@ def opts(col, filter_col=None, filter_val=None):
     vals = sorted(base[col].dropna().unique().tolist())
     return ["Todas"] + vals
 
-
 # ─────────────────────────────────────────────────────────────
-# BARRA LATERAL — filtros
+# BARRA LATERAL
 # ─────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.image(
-        "https://upload.wikimedia.org/wikipedia/commons/4/4b/Logo_Farmacias_Sao_Joao.png",
-        width=140,
-    )
+    st.image("https://upload.wikimedia.org/wikipedia/commons/4/4b/Logo_Farmacias_Sao_Joao.png", width=140)
     st.title("Filtros CRM")
 
     c1, c2 = st.columns(2)
     dt_inicio = c1.date_input("Data Início", value=date(2025, 1, 1))
     dt_fim    = c2.date_input("Data Término", value=date.today())
-
     canal = st.selectbox("Canal de Venda", ["Total", "Loja", "Digital", "Omnichannel"])
 
     st.markdown("---")
     st.subheader("Demográficos")
-
     uf_sel   = st.selectbox("UF da Loja",     opts("UF"))
     cid_sel  = st.selectbox("Cidade da Loja", opts("CIDADE", "UF", uf_sel))
-    loj_sel  = st.selectbox(
-        "Loja",
-        opts("LOJA", "CIDADE", cid_sel) if cid_sel != "Todas"
-        else opts("LOJA", "UF", uf_sel),
-    )
+    loj_sel  = st.selectbox("Loja", opts("LOJA", "CIDADE", cid_sel) if cid_sel != "Todas" else opts("LOJA", "UF", uf_sel))
     reg_sel   = st.selectbox("Região", opts("REGIAO"))
-    faixa_sel = st.selectbox(
-        "Faixa Etária",
-        ["Todas", "Menor de 24", "Entre 25 e 34", "Entre 35 e 44",
-         "Entre 45 e 54", "Entre 55 e 64", "Mais de 65"],
-    )
-    sexo_sel  = st.selectbox(
-        "Sexo",
-        ["Todos"] + sorted(lkp["SEXO"].dropna().unique().tolist()),
-    )
+    faixa_sel = st.selectbox("Faixa Etária", ["Todas", "Menor de 24", "Entre 25 e 34", "Entre 35 e 44", "Entre 45 e 54", "Entre 55 e 64", "Mais de 65"])
+    sexo_sel  = st.selectbox("Sexo", opts("SEXO"))
     tipo_sel  = st.selectbox("Tipo de Cliente", opts("TIPO_PESSOA"))
 
-
 # ─────────────────────────────────────────────────────────────
-# CÁLCULO DE MÉTRICAS — SQL puro via DuckDB
-# Sem pandas, sem cópias de DataFrame, <100MB de RAM constante.
-# Parameter binding (?) garante que espaços e acentos nos nomes
-# de cidades/lojas não quebrem o SQL.
+# CÁLCULO DE MÉTRICAS
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300, show_spinner="Calculando métricas…")
 def calcular(files, uf, cid, loj, reg, faixa, sexo, tipo, canal, dt_ini, dt_fim):
-    col_ultima = {
-        "Loja":        "ULTIMA_COMPRA_LOJA",
-        "Digital":     "ULTIMA_COMPRA_DIGITAL",
-        "Omnichannel": "ULTIMA_COMPRA_OMNI",
-    }.get(canal, "ULTIMA_COMPRA_GERAL")
-
+    col_ultima = {"Loja": "ULTIMA_COMPRA_LOJA", "Digital": "ULTIMA_COMPRA_DIGITAL", "Omnichannel": "ULTIMA_COMPRA_OMNI"}.get(canal, "ULTIMA_COMPRA_GERAL")
     limite_ativos = dt_fim - timedelta(days=90)
 
-    # Monta WHERE com parâmetros posicionais (evita f-string insegura)
-    conds  = ["1=1"]
-    params = [list(files)]   # primeiro parâmetro é sempre a lista de arquivos
-
+    conds, params = ["1=1"], [list(files)]
     def add(col, val, sentinel):
         if val != sentinel:
-            conds.append(f"{col} = ?")
-            params.append(val)
+            conds.append(f"{col} = ?"); params.append(val)
 
-    add("UF",          uf,    "Todas")
-    add("CIDADE",      cid,   "Todas")
-    add("LOJA",        loj,   "Todas")
-    add("REGIAO",      reg,   "Todas")
-    add("FAIXA_ETARIA",faixa, "Todas")
-    add("SEXO",        sexo,  "Todos")
-    add("TIPO_PESSOA", tipo,  "Todos")
-
-    # Datas são passadas diretamente como string ISO (seguro)
-    dt_ini_s      = dt_ini.strftime("%Y-%m-%d")
-    dt_fim_s      = dt_fim.strftime("%Y-%m-%d")
-    limite_s      = limite_ativos.strftime("%Y-%m-%d")
+    add("UF", uf, "Todas")
+    add("CIDADE", cid, "Todas")
+    add("LOJA", loj, "Todas")
+    add("REGIAO", reg, "Todas")
+    add("FAIXA_ETARIA", faixa, "Todas")
+    add("SEXO", sexo, "Todas")
+    add("TIPO_PESSOA", tipo, "Todas")
 
     where = " AND ".join(conds)
-
     sql = f"""
-    SELECT
-        COUNT(*)                                                              AS total,
-        COUNT(PRIMEIRA_COMPRA)                                                AS ident,
-        SUM(CASE WHEN PRIMEIRA_COMPRA BETWEEN '{dt_ini_s}' AND '{dt_fim_s}'
-                 THEN 1 ELSE 0 END)                                           AS novos,
-        SUM(CASE WHEN {col_ultima} BETWEEN '{limite_s}' AND '{dt_fim_s}'
-                 THEN 1 ELSE 0 END)                                           AS ativos,
-        AVG(VALOR_TOTAL)                                                      AS ltv,
-        SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0)                     AS ticket
-    FROM read_parquet(?)
-    WHERE {where}
+    SELECT COUNT(*), COUNT(PRIMEIRA_COMPRA),
+           SUM(CASE WHEN PRIMEIRA_COMPRA BETWEEN '{dt_ini}' AND '{dt_fim}' THEN 1 ELSE 0 END),
+           SUM(CASE WHEN {col_ultima} BETWEEN '{dt_fim - timedelta(days=90)}' AND '{dt_fim}' THEN 1 ELSE 0 END),
+           AVG(VALOR_TOTAL), SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0)
+    FROM read_parquet(?) WHERE {where}
     """
-    # Nota: params[0] é a lista de arquivos para read_parquet(?)
-    # os demais são os filtros de WHERE
-    row = duckdb.execute(sql, params).fetchone()
-    return row if row else (0, 0, 0, 0, 0.0, 0.0)
-
+    return con.execute(sql, params).fetchone()
 
 try:
-    total, ident, novos, ativos, ltv, ticket = calcular(
-        tuple(PARQUET_FILES),
-        uf_sel, cid_sel, loj_sel, reg_sel,
-        faixa_sel, sexo_sel, tipo_sel,
-        canal, dt_inicio, dt_fim,
-    )
+    total, ident, novos, ativos, ltv, ticket = calcular(tuple(PARQUET_FILES), uf_sel, cid_sel, loj_sel, reg_sel, faixa_sel, sexo_sel, tipo_sel, canal, dt_inicio, dt_fim)
 except Exception as e:
-    st.error(f"Erro ao calcular métricas: {e}")
-    st.stop()
-
+    st.error(f"Erro: {e}"); st.stop()
 
 # ─────────────────────────────────────────────────────────────
-# FORMATAÇÃO
+# LAYOUT PRINCIPAL
 # ─────────────────────────────────────────────────────────────
-def fmt_n(v):
-    return f"{int(v or 0):,}".replace(",", ".")
+def fmt_n(v): return f"{int(v or 0):,}".replace(",", ".")
+def fmt_br(v): return "R$ " + f"{float(v or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-def fmt_br(v):
-    s = f"{float(v or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return "R$ " + s
-
-
-# ─────────────────────────────────────────────────────────────
-# LAYOUT PRINCIPAL — design idêntico ao crm.html
-# ─────────────────────────────────────────────────────────────
-st.markdown(f"""
-<div class="crm-topbar">
-  <h1>Dashboard CRM</h1>
-  <p class="sub">{len(PARQUET_FILES)} arquivo(s) · {fmt_n(total)} clientes na seleção</p>
-</div>
-""", unsafe_allow_html=True)
-
+st.markdown(f'<div class="crm-topbar"><h1>Dashboard CRM</h1><p class="sub">{len(PARQUET_FILES)} arquivo(s) · {fmt_n(total)} clientes na seleção</p></div>', unsafe_allow_html=True)
 st.markdown(f"""
 <div class="grid">
-
-  <div class="card c-gray">
-    <div class="card-icon bg-gray">
-      <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-    </div>
-    <div class="card-label">Clientes Totais</div>
-    <div class="card-value">{fmt_n(total)}</div>
-    <div class="card-desc">Total de clientes na seleção.</div>
-  </div>
-
-  <div class="card c-purple">
-    <div class="card-icon bg-purple">
-      <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-    </div>
-    <div class="card-label">Clientes Identificados</div>
-    <div class="card-value">{fmt_n(ident)}</div>
-    <div class="card-desc">Com primeira compra preenchida.</div>
-  </div>
-
-  <div class="card c-green">
-    <div class="card-icon bg-green">
-      <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-    </div>
-    <div class="card-label">Clientes Ativos</div>
-    <div class="card-value">{fmt_n(ativos)}</div>
-    <div class="card-desc">Compras nos últimos 90 dias · canal {canal}.</div>
-  </div>
-
-  <div class="card c-blue">
-    <div class="card-icon bg-blue">
-      <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-    </div>
-    <div class="card-label">Novos Clientes</div>
-    <div class="card-value">{fmt_n(novos)}</div>
-    <div class="card-desc">1ª compra no período selecionado.</div>
-  </div>
-
-  <div class="card c-orange">
-    <div class="card-icon bg-orange">
-      <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-    </div>
-    <div class="card-label">LTV Médio</div>
-    <div class="card-value">{fmt_br(ltv)}</div>
-    <div class="card-desc">Receita média gerada por cliente.</div>
-  </div>
-
-  <div class="card c-purple">
-    <div class="card-icon bg-purple">
-      <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-    </div>
-    <div class="card-label">Ticket Médio</div>
-    <div class="card-value">{fmt_br(ticket)}</div>
-    <div class="card-desc">Valor médio por transação.</div>
-  </div>
-
+  <div class="card c-gray"><div class="card-icon bg-gray"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><div class="card-label">Clientes Totais</div><div class="card-value">{fmt_n(total)}</div><div class="card-desc">Total de clientes na seleção.</div></div>
+  <div class="card c-purple"><div class="card-icon bg-purple"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div><div class="card-label">Clientes Identificados</div><div class="card-value">{fmt_n(ident)}</div><div class="card-desc">Com primeira compra preenchida.</div></div>
+  <div class="card c-green"><div class="card-icon bg-green"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="card-label">Clientes Ativos</div><div class="card-value">{fmt_n(ativos)}</div><div class="card-desc">Compras nos últimos 90 dias · canal {canal}.</div></div>
+  <div class="card c-blue"><div class="card-icon bg-blue"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg></div><div class="card-label">Novos Clientes</div><div class="card-value">{fmt_n(novos)}</div><div class="card-desc">1ª compra no período selecionado.</div></div>
+  <div class="card c-orange"><div class="card-icon bg-orange"><svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="card-label">LTV Médio</div><div class="card-value">{fmt_br(ltv)}</div><div class="card-desc">Receita média gerada por cliente.</div></div>
+  <div class="card c-purple"><div class="card-icon bg-purple"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></div><div class="card-label">Ticket Médio</div><div class="card-value">{fmt_br(ticket)}</div><div class="card-desc">Valor médio por transação.</div></div>
 </div>
 """, unsafe_allow_html=True)

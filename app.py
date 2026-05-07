@@ -64,6 +64,14 @@ df_raw = carregar_dados()
 if df_raw.empty:
     st.stop()
 
+# --- PREPARAÇÃO DE FILTROS (OTIMIZADO) ---
+@st.cache_data(ttl="1d")
+def get_lookup_table(_df):
+    # Cria uma tabela minúscula apenas com as combinações únicas de locais
+    return _df[['UF', 'CIDADE', 'LOJA', 'REGIAO', 'TIPO_PESSOA']].drop_duplicates().dropna()
+
+df_lookup = get_lookup_table(df_raw)
+
 # --- BARRA LATERAL (FILTROS) ---
 st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/4/4b/Logo_Farmacias_Sao_Joao.png", width=150)
 st.sidebar.title("Filtros CRM")
@@ -81,30 +89,34 @@ canal = st.sidebar.selectbox("Canal de Venda", ["Total", "Loja", "Digital", "Omn
 st.sidebar.markdown("---")
 st.sidebar.subheader("Demográficos")
 
-ufs = ["Todas"] + sorted(df_raw['UF'].dropna().unique().tolist())
+# Usamos o df_lookup para preencher os filtros instantaneamente
+ufs = ["Todas"] + sorted(df_lookup['UF'].unique().tolist())
 uf_selecionada = st.sidebar.selectbox("UF da Loja", ufs)
 
 cidades_opcoes = ["Todas"]
 if uf_selecionada != "Todas":
-    cidades_filtradas = df_raw[df_raw['UF'] == uf_selecionada]['CIDADE'].dropna().unique().tolist()
+    cidades_filtradas = df_lookup[df_lookup['UF'] == uf_selecionada]['CIDADE'].unique().tolist()
     cidades_opcoes += sorted(cidades_filtradas)
 else:
-    cidades_opcoes += sorted(df_raw['CIDADE'].dropna().unique().tolist())
+    cidades_opcoes += sorted(df_lookup['CIDADE'].unique().tolist())
 cidade_selecionada = st.sidebar.selectbox("Cidade da Loja", cidades_opcoes)
 
 lojas_opcoes = ["Todas"]
 if cidade_selecionada != "Todas":
-    lojas_filtradas = df_raw[df_raw['CIDADE'] == cidade_selecionada]['LOJA'].dropna().unique().tolist()
+    lojas_filtradas = df_lookup[df_lookup['CIDADE'] == cidade_selecionada]['LOJA'].unique().tolist()
     lojas_opcoes += sorted(lojas_filtradas)
 elif uf_selecionada != "Todas":
-    lojas_filtradas = df_raw[df_raw['UF'] == uf_selecionada]['LOJA'].dropna().unique().tolist()
+    lojas_filtradas = df_lookup[df_lookup['UF'] == uf_selecionada]['LOJA'].unique().tolist()
     lojas_opcoes += sorted(lojas_filtradas)
-loja_selecionada = st.sidebar.selectbox("Loja", lojas_opcoes)
+else:
+    lojas_opcoes += sorted(df_lookup['LOJA'].unique().tolist())
+loja_selecionada = st.sidebar.selectbox("Loja", loja_selecionada if 'loja_selecionada' in locals() else 0, options=lojas_opcoes) if False else st.sidebar.selectbox("Loja", lojas_opcoes)
 
-regiao_selecionada = st.sidebar.selectbox("Região", ["Todas"] + sorted(df_raw['REGIAO'].dropna().unique().tolist()))
+regiao_selecionada = st.sidebar.selectbox("Região", ["Todas"] + sorted(df_lookup['REGIAO'].unique().tolist()))
 faixa_etaria = st.sidebar.selectbox("Faixa Etária", ["Todas", "Menor de 24", "Entre 25 e 34", "Entre 35 e 44", "Entre 45 e 54", "Entre 55 e 64", "Mais de 65"])
 sexo = st.sidebar.selectbox("Sexo", ["Todos", "Feminino", "Masculino"])
-tipo_cliente = st.sidebar.selectbox("Tipo de Cliente", ["Todos"] + sorted(df_raw['TIPO_PESSOA'].dropna().unique().tolist()))
+tipo_cliente = st.sidebar.selectbox("Tipo de Cliente", ["Todos"] + sorted(df_lookup['TIPO_PESSOA'].unique().tolist()))
+
 
 # --- APLICAR FILTROS NO PANDAS (OTIMIZADO PARA MEMÓRIA) ---
 # Em vez de criar cópias do DataFrame, criamos apenas uma máscara booleana.

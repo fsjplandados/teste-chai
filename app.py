@@ -143,24 +143,26 @@ def opts(col, by=None, val=None):
 # ─────────────────────────────────────────────────────────────
 st.markdown('<div class="dash-title">Dashboard CRM</div>', unsafe_allow_html=True)
 
-with st.container():
-    st.markdown('<div class="filter-container">', unsafe_allow_html=True)
-    with st.form("filtros_form", clear_on_submit=False):
-        c1, c2, c3, c4, c5 = st.columns([1.1, 1.1, 0.9, 0.6, 1.4])
-        dt_ini = c1.date_input("Data Início", value=date(2025, 1, 1))
-        dt_fim = c2.date_input("Data Término", value=date.today())
-        canal  = c3.selectbox("Canal", ["Total", "Loja", "Digital", "Omnichannel"])
-        uf_sel = c4.selectbox("UF", opts("UF"))
-        cid_sel = c5.selectbox("Cidade", opts("CIDADE", "UF", uf_sel))
+# Filtros organizados dentro de um formulário que funciona como o card branco
+with st.form("filtros_form", clear_on_submit=False):
+    # Linha 1: Datas e Filtros principais
+    c1, c2, c3, c4, c5 = st.columns([1.1, 1.1, 0.9, 0.6, 1.4])
+    dt_ini = c1.date_input("Data Início", value=date(2025, 1, 1))
+    dt_fim = c2.date_input("Data Término", value=date.today())
+    canal  = c3.selectbox("Canal", ["Total", "Loja", "Digital", "Omnichannel"])
+    uf_sel = c4.selectbox("UF", opts("UF"))
+    cid_sel = c5.selectbox("Cidade", opts("CIDADE", "UF", uf_sel))
 
-        c6, c7, c8, c9, c10, c11 = st.columns([1.4, 0.8, 1, 0.8, 0.8, 0.5])
-        loj_sel = c6.selectbox("Loja", opts("LOJA", "CIDADE", cid_sel) if cid_sel != "Todas" else opts("LOJA", "UF", uf_sel))
-        reg_sel = c7.selectbox("Região", opts("REGIAO"))
-        faixa_sel = c8.selectbox("Faixa Etária", ["Todas", "Menor de 24", "Entre 25 e 34", "Entre 35 e 44", "Entre 45 e 54", "Entre 55 e 64", "Mais de 65"])
-        sexo_sel = c9.selectbox("Sexo", opts("SEXO"))
-        tipo_sel = c10.selectbox("Tipo Cliente", opts("TIPO_PESSOA"))
-        c11.form_submit_button("Filtrar")
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Linha 2: Detalhamento e Botão
+    c6, c7, c8, c9, c10, c11 = st.columns([1.5, 0.9, 1, 0.9, 1, 0.5])
+    loj_sel = c6.selectbox("Loja", opts("LOJA", "CIDADE", cid_sel) if cid_sel != "Todas" else opts("LOJA", "UF", uf_sel))
+    reg_sel = c7.selectbox("Região", opts("REGIAO"))
+    faixa_sel = c8.selectbox("Faixa Etária", ["Todas", "Menor de 24", "Entre 25 e 34", "Entre 35 e 44", "Entre 45 e 54", "Entre 55 e 64", "Mais de 65"])
+    sexo_sel = c9.selectbox("Sexo", opts("SEXO"))
+    tipo_sel = c10.selectbox("Tipo Cliente", opts("TIPO_PESSOA"))
+    
+    # O CSS já cuida para que este botão fique alinhado ao card
+    c11.form_submit_button("Filtrar")
 
 # ─────────────────────────────────────────────────────────────
 # CÁLCULOS (ESTÁVEL E DINÂMICO)

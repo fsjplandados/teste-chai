@@ -29,7 +29,7 @@ st.markdown("""
     [data-testid="stSidebar"], [data-testid="stHeader"], [data-testid="stDecoration"] { display: none !important; }
     
     .main .block-container {
-        padding: 24px 48px 24px 180px !important;
+        padding: 24px 48px 24px 500px !important;
         max-width: 100% !important;
     }
 

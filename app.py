@@ -115,7 +115,7 @@ def build_lookup(_df):
     return (
         _df[["UF", "CIDADE", "LOJA", "REGIAO", "SEXO", "TIPO_PESSOA"]]
         .drop_duplicates()
-        .to_pandas()           # converte ArrowDtype → pandas nativo para opções de filtro
+        .dropna(subset=["UF"])
     )
 
 lkp = build_lookup(df)

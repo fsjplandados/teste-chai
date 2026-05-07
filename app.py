@@ -36,26 +36,23 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- CONEXÃO DUCKDB ---
-# DuckDB permite consultar arquivos Parquet diretamente sem carregar tudo na RAM.
 @st.cache_resource
 def get_con():
-    return duckdb.connect(database=':memory:')
+    c = duckdb.connect(database=':memory:')
+    # Registramos os arquivos como uma VIEW para facilitar o acesso
+    c.execute("CREATE OR REPLACE VIEW dados AS SELECT * FROM read_parquet('base_crm_p*.parquet')")
+    return c
 
 con = get_con()
 
 # --- PREPARAÇÃO DE FILTROS (LOOKUP TABLE) ---
 @st.cache_data(ttl="1d")
 def carregar_lookup():
-    # Carregamos apenas uma fração dos dados para os filtros da barra lateral
     try:
-        # DuckDB lê as colunas de texto e faz o DISTINCT em milissegundos
-        df = con.execute("""
-            SELECT DISTINCT UF, CIDADE, LOJA, REGIAO, TIPO_PESSOA 
-            FROM read_parquet('base_crm_p*.parquet')
-            WHERE UF IS NOT NULL
-        """).df()
-        return df
-    except:
+        # Usamos a VIEW 'dados' que já foi registrada
+        return con.execute("SELECT DISTINCT UF, CIDADE, LOJA, REGIAO, TIPO_PESSOA, SEXO FROM dados").df()
+    except Exception as e:
+        st.error(f"Erro ao carregar lookup: {e}")
         return pd.DataFrame()
 
 df_lookup = carregar_lookup()
@@ -76,24 +73,22 @@ st.sidebar.subheader("Demográficos")
 def get_opts(col, f_col=None, f_val=None):
     if df_lookup.empty: return ["Todas"]
     if f_col and f_val and f_val != "Todas":
-        return ["Todas"] + sorted(df_lookup[df_lookup[f_col] == f_val][col].unique().tolist())
-    return ["Todas"] + sorted(df_lookup[col].unique().tolist())
+        return ["Todas"] + sorted(df_lookup[df_lookup[f_col] == f_val][col].dropna().unique().tolist())
+    return ["Todas"] + sorted(df_lookup[col].dropna().unique().tolist())
 
 uf_sel = st.sidebar.selectbox("UF da Loja", get_opts('UF'))
 cid_sel = st.sidebar.selectbox("Cidade da Loja", get_opts('CIDADE', 'UF', uf_sel))
 loj_sel = st.sidebar.selectbox("Loja", get_opts('LOJA', 'CIDADE', cid_sel) if cid_sel != "Todas" else get_opts('LOJA', 'UF', uf_sel))
 reg_sel = st.sidebar.selectbox("Região", get_opts('REGIAO'))
 faixa_etaria = st.sidebar.selectbox("Faixa Etária", ["Todas", "Menor de 24", "Entre 25 e 34", "Entre 35 e 44", "Entre 45 e 54", "Entre 55 e 64", "Mais de 65"])
-sexo = st.sidebar.selectbox("Sexo", ["Todos", "Feminino", "Masculino"])
+sexo = st.sidebar.selectbox("Sexo", ["Todos"] + [s for s in get_opts('SEXO') if s != "Todas"])
 tipo_cliente = st.sidebar.selectbox("Tipo de Cliente", get_opts('TIPO_PESSOA'))
 
-# --- CÁLCULO DE MÉTRICAS COM DUCKDB (MUITO MAIS LEVE) ---
+# --- CÁLCULO DE MÉTRICAS COM DUCKDB ---
 def calcular_metricas():
-    # Construindo a cláusula WHERE dinamicamente
-    where_clauses = ["1=1"]
-    # Função auxiliar para tratar aspas simples em nomes (evita erro de sintaxe no SQL)
     def esc(t): return str(t).replace("'", "''")
-
+    
+    where_clauses = ["1=1"]
     if uf_sel != "Todas": where_clauses.append(f"UF = '{esc(uf_sel)}'")
     if cid_sel != "Todas": where_clauses.append(f"CIDADE = '{esc(cid_sel)}'")
     if loj_sel != "Todas": where_clauses.append(f"LOJA = '{esc(loj_sel)}'")
@@ -104,40 +99,37 @@ def calcular_metricas():
     
     where_str = " AND ".join(where_clauses)
     
-    # Define a coluna de data conforme o canal
     col_dt = "ULTIMA_COMPRA_GERAL"
     if canal == 'Loja': col_dt = "ULTIMA_COMPRA_LOJA"
     elif canal == 'Digital': col_dt = "ULTIMA_COMPRA_DIGITAL"
     elif canal == 'Omnichannel': col_dt = "ULTIMA_COMPRA_OMNI"
     
-    limite_ativos = (data_termino - timedelta(days=90)).strftime('%Y-%m-%d')
-    dt_ini = data_inicio.strftime('%Y-%m-%d')
-    dt_fim = data_termino.strftime('%Y-%m-%d')
+    limite_ativos = data_termino - timedelta(days=90)
 
     sql = f"""
     SELECT 
         COUNT(*) as total,
         COUNT(PRIMEIRA_COMPRA) as ident,
-        SUM(CASE WHEN PRIMEIRA_COMPRA BETWEEN '{dt_ini}' AND '{dt_fim}' THEN 1 ELSE 0 END) as novos,
-        SUM(CASE WHEN {col_dt} BETWEEN '{limite_ativos}' AND '{dt_fim}' THEN 1 ELSE 0 END) as ativos,
+        SUM(CASE WHEN PRIMEIRA_COMPRA >= '{data_inicio}' AND PRIMEIRA_COMPRA <= '{data_termino}' THEN 1 ELSE 0 END) as novos,
+        SUM(CASE WHEN {col_dt} >= '{limite_ativos}' AND {col_dt} <= '{data_termino}' THEN 1 ELSE 0 END) as ativos,
         AVG(VALOR_TOTAL) as ltv,
         SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0) as ticket
-    FROM read_parquet('base_crm_p*.parquet')
+    FROM dados
     WHERE {where_str}
     """
-    
     return con.execute(sql).fetchone()
 
 try:
     res = calcular_metricas()
     qtd_total, qtd_ident, qtd_novos, qtd_ativos, ltv_medio, ticket_medio = res
 except Exception as e:
-    st.error(f"Erro no processamento SQL: {e}")
+    st.error(f"Erro no SQL: {e}")
     st.stop()
 
 # --- LAYOUT PRINCIPAL ---
-st.title("📊 Dashboard CRM - Performance de Clientes (Powered by DuckDB)")
-st.markdown(f"Analisando **{qtd_total:,.0f}** clientes em tempo real.".replace(",", "."))
+num_arquivos = len(glob.glob('base_crm_p*.parquet'))
+st.title("📊 Dashboard CRM - Performance de Clientes")
+st.caption(f"Status: {num_arquivos} arquivos carregados. Analisando **{qtd_total:,.0f}** clientes.".replace(",", "."))
 
 def fmt_n(v): return f"{int(v or 0):,}".replace(",", ".")
 def fmt_b(v): return f"R$ {(v or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")

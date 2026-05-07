@@ -42,10 +42,10 @@ st.markdown("""
         box-shadow: 4px 0 24px rgba(0,110,255,0.18);
     }
     .logo-circle {
-        width: 48px; height: 48px; background: #fff; border-radius: 50%;
+        width: 44px; height: 44px; background: #fff; border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
-        margin-bottom: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        padding: 8px;
+        margin-bottom: 30px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        padding: 6px;
     }
     .logo-circle img { width: 100%; height: auto; object-fit: contain; }
     
@@ -163,21 +163,33 @@ with st.container():
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
-# CÁLCULOS (ESTÁVEL)
+# CÁLCULOS (ESTÁVEL E DINÂMICO)
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def calcular(files, uf, cid, loj, reg, faixa, sexo, tipo, canal, dt_i, dt_f):
     col_u = {"Loja": "ULTIMA_COMPRA_LOJA", "Digital": "ULTIMA_COMPRA_DIGITAL", "Omnichannel": "ULTIMA_COMPRA_OMNI"}.get(canal, "ULTIMA_COMPRA_GERAL")
+    
+    # Filtros base
     conds, params = ["1=1"], [list(files)]
+    
+    # Filtro de Data na Base (Total de clientes ativos no período)
+    conds.append(f"{col_u} BETWEEN ? AND ?")
+    params.append(dt_i.strftime("%Y-%m-%d"))
+    params.append(dt_f.strftime("%Y-%m-%d"))
+
     def add(col, v):
         if v != "Todas": conds.append(f"{col} = ?"); params.append(v)
+    
     add("UF", uf); add("CIDADE", cid); add("LOJA", loj)
     add("REGIAO", reg); add("FAIXA_ETARIA", faixa); add("SEXO", sexo); add("TIPO_PESSOA", tipo)
+    
+    # Ativos calculados retroativamente a partir da data final selecionada
+    lim_ativos = dt_f - timedelta(days=90)
     
     sql = f"""
     SELECT COUNT(*), COUNT(PRIMEIRA_COMPRA),
            SUM(CASE WHEN PRIMEIRA_COMPRA BETWEEN '{dt_i}' AND '{dt_f}' THEN 1 ELSE 0 END),
-           SUM(CASE WHEN {col_u} BETWEEN '{dt_f - timedelta(days=90)}' AND '{dt_f}' THEN 1 ELSE 0 END),
+           SUM(CASE WHEN {col_u} BETWEEN '{lim_ativos}' AND '{dt_f}' THEN 1 ELSE 0 END),
            AVG(VALOR_TOTAL), SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0)
     FROM read_parquet(?) WHERE {" AND ".join(conds)}
     """

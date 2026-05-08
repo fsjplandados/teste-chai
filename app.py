@@ -29,7 +29,6 @@ st.markdown("""
         width: 100px; height: 100vh; background: var(--blue);
         position: fixed; top: 0; left: 0; z-index: 99999;
         display: flex; flex-direction: column; align-items: center; padding: 24px 0;
-        box-shadow: 4px 0 24px rgba(0,110,255,0.18);
     }
     .logo-circle {
         width: 44px; height: 44px; background: #fff; border-radius: 50%;
@@ -52,24 +51,13 @@ st.markdown("""
         margin-bottom: 32px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
 
-    /* ESTILIZAÇÃO DO BOTÃO ATUALIZAR */
     div[data-testid="stFormSubmitButton"] > button {
-        background-color: var(--blue) !important;
-        color: white !important;
-        border-radius: 10px !important;
-        padding: 10px 24px !important;
-        font-weight: 700 !important;
-        border: none !important;
-        box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important;
-        transition: all 0.3s ease !important;
-        width: auto !important;
-        margin-top: 14px !important;
+        background-color: var(--blue) !important; color: white !important; border-radius: 10px !important;
+        padding: 10px 24px !important; font-weight: 700 !important; border: none !important;
+        box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important; transition: all 0.3s ease !important;
+        width: auto !important; margin-top: 14px !important;
     }
-    div[data-testid="stFormSubmitButton"] > button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 6px 15px rgba(0, 110, 255, 0.4) !important;
-        background-color: #0056CC !important;
-    }
+    div[data-testid="stFormSubmitButton"] > button:hover { transform: translateY(-2px) !important; background-color: #0056CC !important; }
 
     .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
     .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
@@ -104,18 +92,24 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     if reg != "Todas": where.append(f"REGIAO = '{reg}'")
     if sx != "Todas": where.append(f"SEXO = '{sx}'")
     if lj != "Todas": where.append(f"LOJA = '{lj}'")
-    
-    # Canal e Digital
     if can == "Loja": where.append("ULTIMA_COMPRA_LOJA IS NOT NULL")
     elif can == "Digital": where.append("ULTIMA_COMPRA_DIGITAL IS NOT NULL")
     elif can == "Omni": where.append("ULTIMA_COMPRA_OMNI IS NOT NULL")
     
-    # Nota: Filtro Digital simplificado (pode ser expandido se houver a coluna ORIGEM_VENDA)
-    if dig != "Todos": pass # Lógica para Digital específico se a coluna existir
-    
+    # KPIs com Idade Média (Estimada se IDADE não existir)
     sql_kpis = f"""
     SELECT COUNT(*), AVG(VALOR_TOTAL), SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0),
-           COUNT(*) * 0.84, COUNT(*) * 0.65, COUNT(*) * 0.12
+           COUNT(*) * 0.84, COUNT(*) * 0.65,
+           AVG(CASE 
+                WHEN FAIXA_ETARIA = '0-17' THEN 14
+                WHEN FAIXA_ETARIA = '18-25' THEN 22
+                WHEN FAIXA_ETARIA = '26-35' THEN 30
+                WHEN FAIXA_ETARIA = '36-45' THEN 40
+                WHEN FAIXA_ETARIA = '46-55' THEN 50
+                WHEN FAIXA_ETARIA = '56-65' THEN 60
+                WHEN FAIXA_ETARIA = 'Mais de 65' THEN 72
+                ELSE 42
+           END) as idade_media
     FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)}
     """
     k_res = con.execute(sql_kpis).fetchone()
@@ -145,10 +139,7 @@ with st.form("filtros_globais"):
     sexo_sel = r2_c1.selectbox("Sexo", ["Todas", "M", "F"])
     loja_sel = r2_c2.selectbox("Loja", ["Todas", "Loja 01", "Loja 02", "Loja 10"])
     digital_sel = r2_c3.selectbox("Digital", ["Todos", "E-commerce", "APP", "SITE", "iFood"])
-    
-    # Botão com tamanho controlado e cor institucional
-    with r2_c4:
-        st.form_submit_button("Atualizar Dashboard")
+    with r2_c4: st.form_submit_button("Atualizar Dashboard")
 
 d1, d2 = p_range if isinstance(p_range, (list, tuple)) and len(p_range) == 2 else (p_range, p_range)
 k_res, g_res, a_res = get_dashboard_data(d1, d2, uf_sel, reg_sel, sexo_sel, loja_sel, canal_sel, digital_sel)
@@ -164,18 +155,20 @@ def card(label, val, icon_svg, color):
 
 i_u = '<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>'
 i_m = '<svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>'
+i_age = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
 
-# KPIs
+# Row 1
 c1, c2, c3 = st.columns(3)
 with c1: card("Clientes Totais", f"{int(k_res[0]):,}", i_u, "text-3")
 with c2: card("LTV Médio", f"R$ {k_res[1]:,.2f}", i_m, "orange")
 with c3: card("Ticket Médio", f"R$ {k_res[2]:,.2f}", i_m, "purple")
 
+# Row 2 (Idade Média adicionada aqui)
 st.write("")
 c4, c5, c6 = st.columns(3)
-with c4: card("Identificados", f"{int(k_res[3]):,}", i_u, "purple")
-with c5: card("Ativos 90d", f"{int(k_res[4]):,}", i_u, "green")
-with c6: card("Novos Clientes", f"{int(k_res[5]):,}", i_u, "blue")
+with c4: card("Idade Média", f"{int(k_res[5])} anos", i_age, "sky")
+with c5: card("Identificados", f"{int(k_res[3]):,}", i_u, "purple")
+with c6: card("Ativos 90d", f"{int(k_res[4]):,}", i_u, "green")
 
 if current_page == "Perfil":
     st.write("---")

@@ -46,12 +46,21 @@ st.markdown("""
     }
     .nav-item.active { background: rgba(255,255,255,0.2); color: #fff; }
     .nav-item svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; }
+    
     div[data-testid="stForm"] {
         background: #fff !important; border: 1px solid var(--border) !important;
         border-radius: 16px !important; padding: 24px 32px !important;
         margin-bottom: 32px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
-    .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); }
+
+    /* KPI CARDS FIX */
+    .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
+    .kpi-icon { 
+        width: 40px; height: 40px; border-radius: 10px; 
+        display: flex; align-items: center; justify-content: center; margin-bottom: 16px; 
+    }
+    .kpi-icon svg { width: 20px !important; height: 20px !important; stroke: #fff !important; fill: none !important; stroke-width: 2 !important; }
+    
     .kpi-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .1em; }
     .kpi-value-container { display: flex; align-items: baseline; gap: 12px; margin: 6px 0; }
     .kpi-value { font-size: 28px; font-weight: 800; color: var(--text-1); letter-spacing: -0.5px; }
@@ -81,19 +90,12 @@ def get_dashboard_metrics(d_i, d_f, uf, sx):
     where = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"]
     if uf != "Todas": where.append(f"UF = '{uf}'")
     if sx != "Todas": where.append(f"SEXO = '{sx}'")
-    
-    # KPIs
     sql_kpis = f"SELECT COUNT(*), AVG(VALOR_TOTAL) FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)}"
     k_res = con.execute(sql_kpis).fetchone()
-    
-    # Gênero
     sql_gen = f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)} GROUP BY SEXO ORDER BY Porcentagem DESC"
     g_res = con.execute(sql_gen).df()
-    
-    # Faixa Etária
     sql_age = f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)} GROUP BY FAIXA_ETARIA ORDER BY Faixa ASC"
     a_res = con.execute(sql_age).df()
-    
     return k_res, g_res, a_res
 
 # ─────────────────────────────────────────────────────────────
@@ -112,7 +114,6 @@ with st.form("filtros"):
 d1, d2 = p_range if isinstance(p_range, (list, tuple)) and len(p_range) == 2 else (p_range, p_range)
 k_data, g_data, a_data = get_dashboard_metrics(d1, d2, uf_s, sx_s)
 
-# Cards
 def card(label, val, icon_svg, color):
     st.markdown(f"""
     <div class="kpi-card">

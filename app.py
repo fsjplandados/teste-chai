@@ -51,11 +51,22 @@ st.markdown("""
         margin-bottom: 32px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
 
+    /* BOTÃO ATUALIZAR */
     div[data-testid="stFormSubmitButton"] > button {
         background-color: var(--blue) !important; color: white !important; border-radius: 10px !important;
         padding: 10px 24px !important; font-weight: 700 !important; border: none !important;
         box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important; transition: all 0.3s ease !important;
+        width: 100% !important; margin-top: 14px !important;
     }
+    div[data-testid="stFormSubmitButton"] > button:hover { transform: translateY(-2px) !important; background-color: #0056CC !important; }
+
+    /* BOTÃO LIMPAR (Geral de Streamlit para destacar) */
+    .stButton > button {
+        background-color: transparent !important; color: var(--text-2) !important; border-radius: 10px !important;
+        padding: 10px 24px !important; font-weight: 500 !important; border: 1px solid var(--border) !important;
+        transition: all 0.2s ease !important; width: 100% !important; margin-top: 14px !important;
+    }
+    .stButton > button:hover { background-color: #F9FAFB !important; color: var(--text-1) !important; border-color: var(--text-3) !important; }
 
     .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
     .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
@@ -130,11 +141,18 @@ with st.form("filtros_globais"):
     uf_sel = r1_c2.selectbox("UF", ["Todas", "RS", "SC", "PR"])
     reg_sel = r1_c3.selectbox("Região", ["Todas", "Serra", "Litoral", "Metropolitana", "Interior"])
     canal_sel = r1_c4.selectbox("Canal", ["Todas", "Loja", "Digital", "Omni"])
-    r2_c1, r2_c2, r2_c3, r2_c4 = st.columns([1, 1, 1, 1])
+    
+    r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns([1, 1, 1, 0.8, 0.8])
     sexo_sel = r2_c1.selectbox("Sexo", ["Todas", "M", "F"])
     loja_sel = r2_c2.selectbox("Loja", ["Todas", "Loja 01", "Loja 02", "Loja 10"])
     digital_sel = r2_c3.selectbox("Digital", ["Todos", "E-commerce", "APP", "SITE", "iFood"])
-    with r2_c4: st.form_submit_button("Atualizar Dashboard")
+    
+    with r2_c4:
+        st.form_submit_button("Atualizar")
+    with r2_c5:
+        if st.button("Limpar"):
+            st.query_params.update({"p": current_page}) # Força reset do form via rerun
+            st.rerun()
 
 d1, d2 = p_range if isinstance(p_range, (list, tuple)) and len(p_range) == 2 else (p_range, p_range)
 k_res, g_res, a_res = get_dashboard_data(d1, d2, uf_sel, reg_sel, sexo_sel, loja_sel, canal_sel, digital_sel)
@@ -153,7 +171,6 @@ i_m = '<svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M
 i_age = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
 
 if current_page == "Base":
-    # Dashboard CRM - Mostra 6 KPIs
     c1, c2, c3 = st.columns(3)
     with c1: card("Clientes Totais", f"{int(k_res[0]):,}", i_u, "text-3")
     with c2: card("LTV Médio", f"R$ {k_res[1]:,.2f}", i_m, "orange")
@@ -164,10 +181,8 @@ if current_page == "Base":
     with c5: card("Identificados", f"{int(k_res[3]):,}", i_u, "purple")
     with c6: card("Ativos 90d", f"{int(k_res[4]):,}", i_u, "green")
 else:
-    # Perfil de Cliente - Apenas Idade Média + Tabelas
     c1, c2, c3 = st.columns(3)
     with c1: card("Idade Média", f"{int(k_res[5])} anos", i_age, "sky")
-    
     st.write("---")
     t1, t2 = st.columns([1, 1.5])
     with t1:

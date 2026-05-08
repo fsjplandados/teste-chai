@@ -88,7 +88,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
-# LOGICA DE DADOS (HIBRIDA: CLIENTES + VENDAS SE DISPONIVEL)
+# LOGICA DE DADOS (COMPATÍVEL COM COLUNAS REAIS)
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=600)
 def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
@@ -97,6 +97,7 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     f_vendas = "base_vendas_consolidada.parquet"
     vendas_exist = os.path.exists(f_vendas)
     
+    # Filtros baseados nas colunas que confirmamos existir
     where_c = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"]
     if uf != "Todas": where_c.append(f"UF = '{uf}'")
     if reg != "Todas": where_c.append(f"REGIAO = '{reg}'")
@@ -105,21 +106,21 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     
     where_c_str = " AND ".join(where_c)
 
-    if vendas_exist:
-        # LOGICA SNOWFLAKE (LTV DO PERIODO)
-        sql_v_periodo = f"SELECT CPF_CNPJ, SUM(VALOR_TOTAL) as V_PER FROM read_parquet('{f_vendas}') WHERE DATA_VENDA BETWEEN '{d_i}' AND '{d_f}' GROUP BY CPF_CNPJ"
-        con.execute(f"CREATE TEMP VIEW v_p AS {sql_v_periodo}")
-        source = f"read_parquet('{f_clientes}') c INNER JOIN v_p v ON c.CPF_CNPJ = v.CPF_CNPJ"
-        val_col = "v.V_PER"
-    else:
-        # LOGICA FALLBACK (LTV HISTORICO ACUMULADO)
-        source = f"read_parquet('{f_clientes}')"
-        val_col = "VALOR_TOTAL"
+    # Nota: A coluna CPF_CNPJ não foi encontrada na base de clientes. 
+    # Por isso, o JOIN com vendas não funcionará até que a base de clientes seja re-extraída com CPF.
+    if vendas_exist and False: # Desativado temporariamente pela falta de CPF_CNPJ
+        pass
+    
+    source = f"read_parquet('{f_clientes}')"
+    val_col = "VALOR_TOTAL"
 
     sql_kpis = f"""
     SELECT 
-        COUNT(DISTINCT CPF_CNPJ), AVG({val_col}), SUM({val_col}) / NULLIF(COUNT(*), 0),
-        COUNT(*) * 0.84, COUNT(*) * 0.65,
+        COUNT(*), 
+        AVG({val_col}), 
+        SUM({val_col}) / NULLIF(SUM(TOTAL_COMPRAS), 0),
+        COUNT(*) * 0.84, 
+        COUNT(*) * 0.65,
         AVG(CASE 
             WHEN FAIXA_ETARIA = '0-17' THEN 14
             WHEN FAIXA_ETARIA = '18-25' THEN 22
@@ -128,15 +129,15 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
             WHEN FAIXA_ETARIA = '46-55' THEN 50
             WHEN FAIXA_ETARIA = '56-65' THEN 60
             WHEN FAIXA_ETARIA = 'Mais de 65' THEN 72
-            ELSE 42 END)
+            ELSE 42 END) as idade_media
     FROM {source} WHERE {where_c_str}
     """
     k_res = con.execute(sql_kpis).fetchone()
     
-    sql_gen = f"SELECT SEXO as Gênero, COUNT(DISTINCT CPF_CNPJ) * 100.0 / SUM(COUNT(DISTINCT CPF_CNPJ)) OVER() as Porcentagem FROM {source} WHERE {where_c_str} GROUP BY SEXO"
+    sql_gen = f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM {source} WHERE {where_c_str} GROUP BY SEXO"
     g_res = con.execute(sql_gen).df()
     
-    sql_age = f"SELECT FAIXA_ETARIA as Faixa, COUNT(DISTINCT CPF_CNPJ) * 100.0 / SUM(COUNT(DISTINCT CPF_CNPJ)) OVER() as Porcentagem, AVG({val_col}) as LTV FROM {source} WHERE {where_c_str} GROUP BY FAIXA_ETARIA ORDER BY Faixa"
+    sql_age = f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem, AVG({val_col}) as LTV FROM {source} WHERE {where_c_str} GROUP BY FAIXA_ETARIA ORDER BY Faixa"
     a_res = con.execute(sql_age).df()
     
     return k_res, g_res, a_res
@@ -167,10 +168,6 @@ with st.form("filtros_globais"):
         st.rerun()
 
 d1, d2 = p_range if isinstance(p_range, (list, tuple)) and len(p_range) == 2 else (p_range, p_range)
-
-# Alerta amigável
-if not os.path.exists("base_vendas_consolidada.parquet"):
-    st.warning("⚠️ **Nota:** Usando LTV Acumulado (histórico). Para ver o LTV do Período (Abril, etc.), adicione o arquivo 'base_vendas_consolidada.parquet'.")
 
 try:
     k_res, g_res, a_res = get_dashboard_data(d1, d2, uf_sel, reg_sel, sexo_sel, loja_sel, canal_sel, digital_sel)
@@ -213,5 +210,5 @@ try:
             if not a_res.empty:
                 st.table(a_res.style.format({"Porcentagem": "{:.1f}%", "LTV": "R$ {:.2f}"}))
 except Exception as e:
-    st.error(f"Erro ao carregar dados: Verifique se os arquivos Parquet estão corretos.")
-    st.info("Dica: O dashboard tentou rodar a lógica de LTV do período mas encontrou um problema nos dados.")
+    st.error(f"Erro ao carregar dados. Detalhe técnico: {e}")
+    st.info("Dica: Verifique se o arquivo base_crm_p*.parquet contém os dados necessários.")

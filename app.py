@@ -52,11 +52,9 @@ st.markdown("""
         border-radius: 16px !important; padding: 24px 32px !important;
         margin-bottom: 32px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
-
     .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
     .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
     .kpi-icon svg { width: 20px !important; height: 20px !important; stroke: #fff !important; fill: none !important; stroke-width: 2 !important; }
-    
     .kpi-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .1em; }
     .kpi-value-container { display: flex; align-items: baseline; gap: 12px; margin: 6px 0; }
     .kpi-value { font-size: 28px; font-weight: 800; color: var(--text-1); letter-spacing: -0.5px; }
@@ -78,31 +76,34 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
-# LOGICA DE DADOS
+# LOGICA DE DADOS (KPIs REAIS E FILTRADOS)
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=600)
-def get_dashboard_metrics(d_i, d_f, uf, sx):
+def get_full_dashboard_data(d_i, d_f, uf, sx):
     con = duckdb.connect()
     where = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"]
     if uf != "Todas": where.append(f"UF = '{uf}'")
     if sx != "Todas": where.append(f"SEXO = '{sx}'")
     
-    sql_kpis = f"SELECT COUNT(*), AVG(VALOR_TOTAL) FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)}"
+    # KPIs Detalhados
+    sql_kpis = f"""
+    SELECT 
+        COUNT(*) as totais,
+        AVG(VALOR_TOTAL) as ltv,
+        SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0) as ticket,
+        SUM(CASE WHEN TIPO_PESSOA != 'N' THEN 1 ELSE 0 END) as ident,
+        SUM(CASE WHEN ULTIMA_COMPRA_GERAL >= CAST('{d_f}' AS DATE) - INTERVAL 90 DAY THEN 1 ELSE 0 END) as ativos,
+        SUM(CASE WHEN PRIMEIRA_COMPRA BETWEEN '{d_i}' AND '{d_f}' THEN 1 ELSE 0 END) as novos
+    FROM read_parquet('base_crm_p*.parquet') 
+    WHERE {' AND '.join(where)}
+    """
     k_res = con.execute(sql_kpis).fetchone()
     
+    # Tabelas
     sql_gen = f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)} GROUP BY SEXO ORDER BY Porcentagem DESC"
     g_res = con.execute(sql_gen).df()
     
-    # Faixa Etária com LTV Médio
-    sql_age = f"""
-        SELECT FAIXA_ETARIA as Faixa, 
-               COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem,
-               AVG(VALOR_TOTAL) as "LTV Médio"
-        FROM read_parquet('base_crm_p*.parquet') 
-        WHERE {' AND '.join(where)} 
-        GROUP BY FAIXA_ETARIA 
-        ORDER BY Faixa ASC
-    """
+    sql_age = f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem, AVG(VALOR_TOTAL) as LTV FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)} GROUP BY FAIXA_ETARIA ORDER BY Faixa ASC"
     a_res = con.execute(sql_age).df()
     
     return k_res, g_res, a_res
@@ -121,8 +122,9 @@ with st.form("filtros"):
     st.form_submit_button("Aplicar")
 
 d1, d2 = p_range if isinstance(p_range, (list, tuple)) and len(p_range) == 2 else (p_range, p_range)
-k_data, g_data, a_data = get_dashboard_metrics(d1, d2, uf_s, sx_s)
+k_data, g_data, a_data = get_full_dashboard_data(d1, d2, uf_s, sx_s)
 
+# Cards
 def card(label, val, icon_svg, color):
     st.markdown(f"""
     <div class="kpi-card">
@@ -136,14 +138,21 @@ def card(label, val, icon_svg, color):
 i_u = '<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>'
 i_m = '<svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>'
 
-c1, c2, c3 = st.columns(3)
-with c1: card("Clientes Totais", f"{k_data[0]:,}", i_u, "text-3")
-with c2: card("LTV Médio", f"R$ {k_data[1]:,.2f}", i_m, "orange")
-with c3: card("Ticket Médio", f"R$ {k_data[1]*0.8:,.2f}", i_m, "purple")
+# Renderizar 6 KPIs (Em ambas as páginas)
+r1_c1, r1_c2, r1_c3 = st.columns(3)
+with r1_c1: card("Clientes Totais", f"{int(k_data[0]):,}", i_u, "text-3")
+with r1_c2: card("LTV Médio", f"R$ {k_data[1]:,.2f}", i_m, "orange")
+with r1_c3: card("Ticket Médio", f"R$ {k_data[2]:,.2f}", i_m, "purple")
+
+st.write("")
+r2_c1, r2_c2, r2_c3 = st.columns(3)
+with r2_c1: card("Identificados", f"{int(k_data[3]):,}", i_u, "purple")
+with r2_c2: card("Ativos 90d", f"{int(k_data[4]):,}", i_u, "green")
+with r2_c3: card("Novos Clientes", f"{int(k_data[5]):,}", i_u, "blue")
 
 if current_page == "Perfil":
     st.write("---")
-    t1, t2 = st.columns([1, 1.5]) # Ajustado o tamanho das colunas para caber o LTV
+    t1, t2 = st.columns([1, 1.5])
     with t1:
         st.subheader("Distribuição por Gênero")
         if not g_data.empty:
@@ -152,7 +161,7 @@ if current_page == "Perfil":
     with t2:
         st.subheader("Perfil por Faixa Etária")
         if not a_data.empty:
-            st.table(a_data.style.format({
-                "Porcentagem": "{:.1f}%",
-                "LTV Médio": "R$ {:.2f}"
-            }))
+            st.table(a_data.style.format({"Porcentagem": "{:.1f}%", "LTV": "R$ {:.2f}"}))
+else:
+    st.write("---")
+    st.info("Página de Dashboard Geral carregada. Use a barra lateral para mais detalhes.")

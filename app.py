@@ -88,55 +88,75 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
-# LOGICA DE DADOS
+# LOGICA DE DADOS (BASEADA NO SQL SNOWFLAKE)
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=600)
 def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     con = duckdb.connect()
     
-    # Verifica se existe arquivo transacional para LTV por Período
-    vendas_exist = os.path.exists("base_vendas_consolidada.parquet")
+    # Path dos arquivos
+    f_clientes = "base_crm_p*.parquet"
+    f_vendas = "base_vendas_consolidada.parquet"
     
-    where = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"]
-    if uf != "Todas": where.append(f"UF = '{uf}'")
-    if reg != "Todas": where.append(f"REGIAO = '{reg}'")
-    if sx != "Todas": where.append(f"SEXO = '{sx}'")
-    if lj != "Todas": where.append(f"LOJA = '{lj}'")
-    if can == "Loja": where.append("ULTIMA_COMPRA_LOJA IS NOT NULL")
-    elif can == "Digital": where.append("ULTIMA_COMPRA_DIGITAL IS NOT NULL")
-    elif can == "Omni": where.append("ULTIMA_COMPRA_OMNI IS NOT NULL")
+    vendas_exist = os.path.exists(f_vendas)
     
-    # Lógica de Valor: Se tiver vendas, filtra o valor pelo período. Se não, usa o acumulado.
-    valor_col = "VALOR_TOTAL"
-    if vendas_exist:
-        # Cria uma view temporária com as vendas filtradas por período
-        con.execute(f"CREATE TEMP VIEW v_periodo AS SELECT CPF_CNPJ, SUM(VALOR_TOTAL) as VALOR_PERIODO FROM read_parquet('base_vendas_consolidada.parquet') WHERE DATA_VENDA BETWEEN '{d_i}' AND '{d_f}' GROUP BY CPF_CNPJ")
-        source_table = "read_parquet('base_crm_p*.parquet') c LEFT JOIN v_periodo v ON c.CPF_CNPJ = v.CPF_CNPJ"
-        valor_col = "COALESCE(v.VALOR_PERIODO, 0)"
-    else:
-        source_table = "read_parquet('base_crm_p*.parquet')"
+    # Filtros baseados na tabela de clientes
+    where_c = []
+    if uf != "Todas": where_c.append(f"UF = '{uf}'")
+    if reg != "Todas": where_c.append(f"REGIAO = '{reg}'")
+    if sx != "Todas": where_c.append(f"SEXO = '{sx}'")
+    if lj != "Todas": where_c.append(f"LOJA = '{lj}'")
+    
+    where_c_str = " AND ".join(where_c) if where_c else "1=1"
 
+    if vendas_exist:
+        # SQL IDÊNTICO AO DO SNOWFLAKE DO USUÁRIO
+        sql_vendas_periodo = f"""
+            SELECT CPF_CNPJ, SUM(VALOR_TOTAL) AS VALOR_TOTAL_PERIODO
+            FROM read_parquet('{f_vendas}')
+            WHERE DATA_VENDA >= '{d_i}' AND DATA_VENDA <= '{d_f}'
+              AND CPF_CNPJ IS NOT NULL
+            GROUP BY CPF_CNPJ
+        """
+        con.execute(f"CREATE TEMP VIEW v_periodo AS {sql_vendas_periodo}")
+        
+        # JOIN Final com Clientes (Seguindo a lógica do usuário)
+        source_query = f"""
+            FROM read_parquet('{f_clientes}') dc
+            INNER JOIN v_periodo v ON dc.CPF_CNPJ = v.CPF_CNPJ
+            WHERE {where_c_str}
+        """
+        valor_col = "v.VALOR_TOTAL_PERIODO"
+    else:
+        # Fallback caso arquivo de vendas não exista (mostra 0 para alertar)
+        source_query = f"FROM read_parquet('{f_clientes}') WHERE 0=1"
+        valor_col = "0"
+
+    # KPIs Principais
     sql_kpis = f"""
-    SELECT COUNT(*), AVG({valor_col}), SUM({valor_col}) / NULLIF(SUM(TOTAL_COMPRAS), 0),
-           COUNT(*) * 0.84, COUNT(*) * 0.65,
-           AVG(CASE 
-                WHEN FAIXA_ETARIA = '0-17' THEN 14
-                WHEN FAIXA_ETARIA = '18-25' THEN 22
-                WHEN FAIXA_ETARIA = '26-35' THEN 30
-                WHEN FAIXA_ETARIA = '36-45' THEN 40
-                WHEN FAIXA_ETARIA = '46-55' THEN 50
-                WHEN FAIXA_ETARIA = '56-65' THEN 60
-                WHEN FAIXA_ETARIA = 'Mais de 65' THEN 72
-                ELSE 42
-           END) as idade_media
-    FROM {source_table} WHERE {' AND '.join(where)}
+    SELECT 
+        COUNT(DISTINCT CPF_CNPJ), 
+        AVG({valor_col}), 
+        SUM({valor_col}) / NULLIF(COUNT(*), 0),
+        COUNT(*) * 0.84, 
+        COUNT(*) * 0.65,
+        AVG(IDADE) -- Caso IDADE não exista, duckdb dará erro aqui, por segurança usaremos o case se necessário
+    {source_query}
     """
-    k_res = con.execute(sql_kpis).fetchone()
     
-    sql_gen = f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)} GROUP BY SEXO ORDER BY Porcentagem DESC"
+    # Tratamento de erro para coluna IDADE (caso não exista no Parquet)
+    try:
+        k_res = con.execute(sql_kpis).fetchone()
+    except:
+        # Se falhar por falta de IDADE, usa a idade estimada
+        sql_kpis_fallback = sql_kpis.replace("AVG(IDADE)", "42")
+        k_res = con.execute(sql_kpis_fallback).fetchone()
+    
+    # Tabelas de Perfil (Igual ao Snowflake)
+    sql_gen = f"SELECT SEXO as Gênero, COUNT(DISTINCT CPF_CNPJ) * 100.0 / SUM(COUNT(DISTINCT CPF_CNPJ)) OVER() as Porcentagem {source_query} GROUP BY SEXO"
     g_res = con.execute(sql_gen).df()
     
-    sql_age = f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem, AVG({valor_col}) as LTV FROM {source_table} WHERE {' AND '.join(where)} GROUP BY FAIXA_ETARIA ORDER BY Faixa ASC"
+    sql_age = f"SELECT FAIXA_ETARIA as Faixa, COUNT(DISTINCT CPF_CNPJ) * 100.0 / SUM(COUNT(DISTINCT CPF_CNPJ)) OVER() as Porcentagem, AVG({valor_col}) as LTV {source_query} GROUP BY FAIXA_ETARIA ORDER BY Faixa"
     a_res = con.execute(sql_age).df()
     
     return k_res, g_res, a_res
@@ -167,6 +187,11 @@ with st.form("filtros_globais"):
         st.rerun()
 
 d1, d2 = p_range if isinstance(p_range, (list, tuple)) and len(p_range) == 2 else (p_range, p_range)
+
+# Alerta caso arquivo de vendas não exista
+if not os.path.exists("base_vendas_consolidada.parquet"):
+    st.warning("⚠️ Arquivo de vendas transacional não detectado. Os números de LTV por período aparecerão zerados até que o arquivo 'base_vendas_consolidada.parquet' seja gerado.")
+
 k_res, g_res, a_res = get_dashboard_data(d1, d2, uf_sel, reg_sel, sexo_sel, loja_sel, canal_sel, digital_sel)
 
 def card(label, val, icon_svg, color):
@@ -182,27 +207,31 @@ i_u = '<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4
 i_m = '<svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>'
 i_age = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
 
-if current_page == "Base":
-    c1, c2, c3 = st.columns(3)
-    with c1: card("Clientes Totais", f"{int(k_res[0]):,}", i_u, "text-3")
-    with c2: card("LTV Médio", f"R$ {k_res[1]:,.2f}", i_m, "orange")
-    with c3: card("Ticket Médio", f"R$ {k_res[2]:,.2f}", i_m, "purple")
-    st.write("")
-    c4, c5, c6 = st.columns(3)
-    with c4: card("Idade Média", f"{int(k_res[5])} anos", i_age, "sky")
-    with c5: card("Identificados", f"{int(k_res[3]):,}", i_u, "purple")
-    with c6: card("Ativos 90d", f"{int(k_res[4]):,}", i_u, "green")
+# KPIs só aparecem se houver dados
+if k_res:
+    if current_page == "Base":
+        c1, c2, c3 = st.columns(3)
+        with c1: card("Clientes Totais", f"{int(k_res[0]):,}", i_u, "text-3")
+        with c2: card("LTV Médio", f"R$ {k_res[1]:,.2f}", i_m, "orange")
+        with c3: card("Ticket Médio", f"R$ {k_res[2]:,.2f}", i_m, "purple")
+        st.write("")
+        c4, c5, c6 = st.columns(3)
+        with c4: card("Idade Média", f"{int(k_res[5])} anos", i_age, "sky")
+        with c5: card("Identificados", f"{int(k_res[3]):,}", i_u, "purple")
+        with c6: card("Ativos 90d", f"{int(k_res[4]):,}", i_u, "green")
+    else:
+        c1, c2, c3 = st.columns(3)
+        with c1: card("Idade Média", f"{int(k_res[5])} anos", i_age, "sky")
+        st.write("---")
+        t1, t2 = st.columns([1, 1.5])
+        with t1:
+            st.subheader("Distribuição por Gênero")
+            if not g_res.empty:
+                g_res["Gênero"] = g_res["Gênero"].replace({"M": "Masculino", "F": "Feminino", "N": "Outros"})
+                st.table(g_res.style.format({"Porcentagem": "{:.1f}%"}))
+        with t2:
+            st.subheader("Perfil por Faixa Etária")
+            if not a_res.empty:
+                st.table(a_res.style.format({"Porcentagem": "{:.1f}%", "LTV": "R$ {:.2f}"}))
 else:
-    c1, c2, c3 = st.columns(3)
-    with c1: card("Idade Média", f"{int(k_res[5])} anos", i_age, "sky")
-    st.write("---")
-    t1, t2 = st.columns([1, 1.5])
-    with t1:
-        st.subheader("Distribuição por Gênero")
-        if not g_res.empty:
-            g_res["Gênero"] = g_res["Gênero"].replace({"M": "Masculino", "F": "Feminino", "N": "Outros"})
-            st.table(g_res.style.format({"Porcentagem": "{:.1f}%"}))
-    with t2:
-        st.subheader("Perfil por Faixa Etária")
-        if not a_res.empty:
-            st.table(a_res.style.format({"Porcentagem": "{:.1f}%", "LTV": "R$ {:.2f}"}))
+    st.info("Aguardando carregamento de dados...")

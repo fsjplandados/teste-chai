@@ -45,27 +45,31 @@ st.markdown("""
     .nav-item.active { background: rgba(255,255,255,0.2); color: #fff; }
     .nav-item svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; }
     
-    /* DESIGN DA CAIXA DE FILTROS */
     div[data-testid="stForm"] {
         background: #fff !important; border: 1px solid var(--border) !important;
         border-radius: 16px !important; padding: 24px 32px !important;
         margin-bottom: 32px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
 
-    /* BOTÃO ATUALIZAR (AZUL) */
+    /* BOTÃO ATUALIZAR (AZUL VIBRANTE) */
     div[data-testid="stFormSubmitButton"]:nth-child(1) > button {
         background-color: var(--blue) !important; color: white !important; border-radius: 10px !important;
         padding: 10px 24px !important; font-weight: 700 !important; border: none !important;
         box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important; width: 100% !important; margin-top: 14px !important;
     }
 
-    /* BOTÃO LIMPAR (CINZA) */
+    /* BOTÃO LIMPAR (AZUL CLARINHO) */
     div[data-testid="stFormSubmitButton"]:nth-child(2) > button {
-        background-color: transparent !important; color: var(--text-2) !important; border-radius: 10px !important;
-        padding: 10px 24px !important; font-weight: 500 !important; border: 1px solid var(--border) !important;
-        width: 100% !important; margin-top: 14px !important;
+        background-color: rgba(0, 110, 255, 0.08) !important; 
+        color: var(--blue) !important; 
+        border-radius: 10px !important;
+        padding: 10px 24px !important; 
+        font-weight: 600 !important; 
+        border: 1px solid rgba(0, 110, 255, 0.2) !important;
+        width: 100% !important; 
+        margin-top: 14px !important;
     }
-    div[data-testid="stFormSubmitButton"] > button:hover { transform: translateY(-1px) !important; opacity: 0.9; }
+    div[data-testid="stFormSubmitButton"] > button:hover { transform: translateY(-1px) !important; opacity: 0.85; }
 
     .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
     .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }

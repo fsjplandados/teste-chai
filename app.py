@@ -45,25 +45,27 @@ st.markdown("""
     .nav-item.active { background: rgba(255,255,255,0.2); color: #fff; }
     .nav-item svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; }
     
-    .filter-container {
-        background: #fff; border: 1px solid var(--border);
-        border-radius: 16px; padding: 24px 32px;
-        margin-bottom: 32px; box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+    /* DESIGN DA CAIXA DE FILTROS */
+    div[data-testid="stForm"] {
+        background: #fff !important; border: 1px solid var(--border) !important;
+        border-radius: 16px !important; padding: 24px 32px !important;
+        margin-bottom: 32px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
 
-    /* BOTÃO ATUALIZAR (PRIMARY) */
-    .stButton > button[kind="primary"] {
+    /* BOTÃO ATUALIZAR (AZUL) */
+    div[data-testid="stFormSubmitButton"]:nth-child(1) > button {
         background-color: var(--blue) !important; color: white !important; border-radius: 10px !important;
         padding: 10px 24px !important; font-weight: 700 !important; border: none !important;
-        box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important; width: 100% !important; margin-top: 28px !important;
+        box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important; width: 100% !important; margin-top: 14px !important;
     }
 
-    /* BOTÃO LIMPAR (SECONDARY) */
-    .stButton > button[kind="secondary"] {
+    /* BOTÃO LIMPAR (CINZA) */
+    div[data-testid="stFormSubmitButton"]:nth-child(2) > button {
         background-color: transparent !important; color: var(--text-2) !important; border-radius: 10px !important;
         padding: 10px 24px !important; font-weight: 500 !important; border: 1px solid var(--border) !important;
-        width: 100% !important; margin-top: 28px !important;
+        width: 100% !important; margin-top: 14px !important;
     }
+    div[data-testid="stFormSubmitButton"] > button:hover { transform: translateY(-1px) !important; opacity: 0.9; }
 
     .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
     .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
@@ -131,9 +133,7 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
 # ─────────────────────────────────────────────────────────────
 st.markdown(f'<h1 style="font-size:24px; font-weight:800; color:#111827; margin-bottom:20px;">{"Dashboard CRM" if current_page=="Base" else "Perfil de Cliente"}</h1>', unsafe_allow_html=True)
 
-# Container de Filtros (Sem Form para permitir múltiplos botões)
-with st.container():
-    st.markdown('<div class="filter-container">', unsafe_allow_html=True)
+with st.form("filtros_globais"):
     r1_c1, r1_c2, r1_c3, r1_c4 = st.columns([1.5, 1, 1, 1])
     hoje = date.today()
     p_range = r1_c1.date_input("Período", value=(hoje - timedelta(days=90), hoje))
@@ -141,19 +141,17 @@ with st.container():
     reg_sel = r1_c3.selectbox("Região", ["Todas", "Serra", "Litoral", "Metropolitana", "Interior"])
     canal_sel = r1_c4.selectbox("Canal", ["Todas", "Loja", "Digital", "Omni"])
     
-    r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns([1, 1, 1, 0.8, 0.8])
+    r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns([1, 1, 1, 1, 1])
     sexo_sel = r2_c1.selectbox("Sexo", ["Todas", "M", "F"])
     loja_sel = r2_c2.selectbox("Loja", ["Todas", "Loja 01", "Loja 02", "Loja 10"])
     digital_sel = r2_c3.selectbox("Digital", ["Todos", "E-commerce", "APP", "SITE", "iFood"])
     
-    btn_atu = r2_c4.button("Atualizar", type="primary")
-    btn_lim = r2_c5.button("Limpar", type="secondary")
+    btn_atu = r2_c4.form_submit_button("Atualizar")
+    btn_lim = r2_c5.form_submit_button("Limpar filtros")
     
     if btn_lim:
         st.query_params.update({"p": current_page})
         st.rerun()
-    
-    st.markdown('</div>', unsafe_allow_html=True)
 
 d1, d2 = p_range if isinstance(p_range, (list, tuple)) and len(p_range) == 2 else (p_range, p_range)
 k_res, g_res, a_res = get_dashboard_data(d1, d2, uf_sel, reg_sel, sexo_sel, loja_sel, canal_sel, digital_sel)

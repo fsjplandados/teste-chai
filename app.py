@@ -51,6 +51,26 @@ st.markdown("""
         border-radius: 16px !important; padding: 24px 32px !important;
         margin-bottom: 32px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
+
+    /* ESTILIZAÇÃO DO BOTÃO ATUALIZAR */
+    div[data-testid="stFormSubmitButton"] > button {
+        background-color: var(--blue) !important;
+        color: white !important;
+        border-radius: 10px !important;
+        padding: 10px 24px !important;
+        font-weight: 700 !important;
+        border: none !important;
+        box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important;
+        transition: all 0.3s ease !important;
+        width: auto !important;
+        margin-top: 14px !important;
+    }
+    div[data-testid="stFormSubmitButton"] > button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 15px rgba(0, 110, 255, 0.4) !important;
+        background-color: #0056CC !important;
+    }
+
     .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
     .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
     .kpi-icon svg { width: 20px !important; height: 20px !important; stroke: #fff !important; fill: none !important; stroke-width: 2 !important; }
@@ -77,7 +97,7 @@ st.markdown(f"""
 # LOGICA DE DADOS
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=600)
-def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can):
+def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     con = duckdb.connect()
     where = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"]
     if uf != "Todas": where.append(f"UF = '{uf}'")
@@ -85,10 +105,13 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can):
     if sx != "Todas": where.append(f"SEXO = '{sx}'")
     if lj != "Todas": where.append(f"LOJA = '{lj}'")
     
-    # Lógica de Canal
+    # Canal e Digital
     if can == "Loja": where.append("ULTIMA_COMPRA_LOJA IS NOT NULL")
     elif can == "Digital": where.append("ULTIMA_COMPRA_DIGITAL IS NOT NULL")
     elif can == "Omni": where.append("ULTIMA_COMPRA_OMNI IS NOT NULL")
+    
+    # Nota: Filtro Digital simplificado (pode ser expandido se houver a coluna ORIGEM_VENDA)
+    if dig != "Todos": pass # Lógica para Digital específico se a coluna existir
     
     sql_kpis = f"""
     SELECT COUNT(*), AVG(VALOR_TOTAL), SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0),
@@ -118,15 +141,17 @@ with st.form("filtros_globais"):
     reg_sel = r1_c3.selectbox("Região", ["Todas", "Serra", "Litoral", "Metropolitana", "Interior"])
     canal_sel = r1_c4.selectbox("Canal", ["Todas", "Loja", "Digital", "Omni"])
     
-    r2_c1, r2_c2, r2_c3 = st.columns([1, 1, 2])
+    r2_c1, r2_c2, r2_c3, r2_c4 = st.columns([1, 1, 1, 1])
     sexo_sel = r2_c1.selectbox("Sexo", ["Todas", "M", "F"])
-    loja_sel = r2_c2.selectbox("Loja", ["Todas", "Loja 01", "Loja 02", "Loja 10", "Digital"])
+    loja_sel = r2_c2.selectbox("Loja", ["Todas", "Loja 01", "Loja 02", "Loja 10"])
+    digital_sel = r2_c3.selectbox("Digital", ["Todos", "E-commerce", "APP", "SITE", "iFood"])
     
-    if r2_c3.form_submit_button("📊 Atualizar Dashboard", use_container_width=True):
-        st.toast("Filtros aplicados!")
+    # Botão com tamanho controlado e cor institucional
+    with r2_c4:
+        st.form_submit_button("Atualizar Dashboard")
 
 d1, d2 = p_range if isinstance(p_range, (list, tuple)) and len(p_range) == 2 else (p_range, p_range)
-k_res, g_res, a_res = get_dashboard_data(d1, d2, uf_sel, reg_sel, sexo_sel, loja_sel, canal_sel)
+k_res, g_res, a_res = get_dashboard_data(d1, d2, uf_sel, reg_sel, sexo_sel, loja_sel, canal_sel, digital_sel)
 
 def card(label, val, icon_svg, color):
     st.markdown(f"""

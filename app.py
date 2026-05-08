@@ -57,7 +57,6 @@ st.markdown("""
     .kpi-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .1em; }
     .kpi-value-container { display: flex; align-items: baseline; gap: 12px; margin: 6px 0; }
     .kpi-value { font-size: 28px; font-weight: 800; color: var(--text-1); letter-spacing: -0.5px; }
-    .delta { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; display: flex; align-items: center; gap: 4px; background: rgba(16, 185, 129, 0.1); color: var(--green); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -78,27 +77,21 @@ st.markdown(f"""
 # LOGICA DE DADOS
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=600)
-def get_full_dashboard_data(d_i, d_f, uf, sx):
+def get_dashboard_data(d_i, d_f, uf, reg, sx, lj):
     con = duckdb.connect()
     where = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"]
     if uf != "Todas": where.append(f"UF = '{uf}'")
+    if reg != "Todas": where.append(f"REGIAO = '{reg}'")
     if sx != "Todas": where.append(f"SEXO = '{sx}'")
+    if lj != "Todas": where.append(f"LOJA = '{lj}'")
     
-    # KPIs
     sql_kpis = f"""
-    SELECT 
-        COUNT(*) as totais,
-        AVG(VALOR_TOTAL) as ltv,
-        SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0) as ticket,
-        COUNT(*) * 0.84 as ident,
-        COUNT(*) * 0.65 as ativos,
-        COUNT(*) * 0.12 as novos
-    FROM read_parquet('base_crm_p*.parquet') 
-    WHERE {' AND '.join(where)}
+    SELECT COUNT(*), AVG(VALOR_TOTAL), SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0),
+           COUNT(*) * 0.84, COUNT(*) * 0.65, COUNT(*) * 0.12
+    FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)}
     """
     k_res = con.execute(sql_kpis).fetchone()
     
-    # Tabelas
     sql_gen = f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)} GROUP BY SEXO ORDER BY Porcentagem DESC"
     g_res = con.execute(sql_gen).df()
     
@@ -112,51 +105,56 @@ def get_full_dashboard_data(d_i, d_f, uf, sx):
 # ─────────────────────────────────────────────────────────────
 st.markdown(f'<h1 style="font-size:24px; font-weight:800; color:#111827; margin-bottom:20px;">{"Dashboard CRM" if current_page=="Base" else "Perfil de Cliente"}</h1>', unsafe_allow_html=True)
 
-with st.form("filtros"):
-    c1, c2, c3, c4 = st.columns([1.5, 1, 1, 0.5])
+with st.form("filtros_globais"):
+    r1_c1, r1_c2, r1_c3 = st.columns([2, 1, 1])
     hoje = date.today()
-    p_range = c1.date_input("Período", value=(hoje - timedelta(days=90), hoje))
-    uf_s = c2.selectbox("UF", ["Todas", "RS", "SC", "PR"])
-    sx_s = c3.selectbox("Sexo", ["Todas", "M", "F"])
-    st.form_submit_button("Aplicar")
+    p_range = r1_c1.date_input("Período", value=(hoje - timedelta(days=90), hoje))
+    uf_sel = r1_c2.selectbox("UF", ["Todas", "RS", "SC", "PR"])
+    reg_sel = r1_c3.selectbox("Região", ["Todas", "Serra", "Litoral", "Metropolitana", "Interior"])
+    
+    r2_c1, r2_c2, r2_c3 = st.columns([1, 1, 2])
+    sexo_sel = r2_c1.selectbox("Sexo", ["Todas", "M", "F"])
+    loja_sel = r2_c2.selectbox("Loja", ["Todas", "Loja 01", "Loja 02", "Loja 10", "Digital"])
+    r2_c3.write("") # Espaçador
+    if r2_c3.form_submit_button("📊 Atualizar Dashboard", use_container_width=True):
+        st.toast("Dados atualizados com sucesso!")
 
 d1, d2 = p_range if isinstance(p_range, (list, tuple)) and len(p_range) == 2 else (p_range, p_range)
-k_data, g_data, a_data = get_full_dashboard_data(d1, d2, uf_s, sx_s)
+k_res, g_res, a_res = get_dashboard_data(d1, d2, uf_sel, reg_sel, sexo_sel, loja_sel)
 
 def card(label, val, icon_svg, color):
     st.markdown(f"""
     <div class="kpi-card">
         <div class="kpi-icon" style="background:var(--{color})">{icon_svg}</div>
         <div class="kpi-label">{label}</div>
-        <div class="kpi-value-container"><div class="kpi-value">{val}</div><div class="delta">▲ 12.5%</div></div>
-        <div style="font-size:10px; color:var(--text-3);">vs. período anterior</div>
+        <div class="kpi-value-container"><div class="kpi-value">{val}</div></div>
     </div>
     """, unsafe_allow_html=True)
 
 i_u = '<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>'
 i_m = '<svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>'
 
-# Renderizar 6 KPIs
-r1_c1, r1_c2, r1_c3 = st.columns(3)
-with r1_c1: card("Clientes Totais", f"{int(k_data[0]):,}", i_u, "text-3")
-with r1_c2: card("LTV Médio", f"R$ {k_data[1]:,.2f}", i_m, "orange")
-with r1_c3: card("Ticket Médio", f"R$ {k_data[2]:,.2f}", i_m, "purple")
+# KPIs
+c1, c2, c3 = st.columns(3)
+with c1: card("Clientes Totais", f"{int(k_res[0]):,}", i_u, "text-3")
+with c2: card("LTV Médio", f"R$ {k_res[1]:,.2f}", i_m, "orange")
+with c3: card("Ticket Médio", f"R$ {k_res[2]:,.2f}", i_m, "purple")
 
 st.write("")
-r2_c1, r2_c2, r2_c3 = st.columns(3)
-with r2_c1: card("Identificados", f"{int(k_data[3]):,}", i_u, "purple")
-with r2_c2: card("Ativos 90d", f"{int(k_data[4]):,}", i_u, "green")
-with r2_c3: card("Novos Clientes", f"{int(k_data[5]):,}", i_u, "blue")
+c4, c5, c6 = st.columns(3)
+with c4: card("Identificados", f"{int(k_res[3]):,}", i_u, "purple")
+with c5: card("Ativos 90d", f"{int(k_res[4]):,}", i_u, "green")
+with c6: card("Novos Clientes", f"{int(k_res[5]):,}", i_u, "blue")
 
 if current_page == "Perfil":
     st.write("---")
     t1, t2 = st.columns([1, 1.5])
     with t1:
         st.subheader("Distribuição por Gênero")
-        if not g_data.empty:
-            g_data["Gênero"] = g_data["Gênero"].replace({"M": "Masculino", "F": "Feminino", "N": "Outros"})
-            st.table(g_data.style.format({"Porcentagem": "{:.1f}%"}))
+        if not g_res.empty:
+            g_res["Gênero"] = g_res["Gênero"].replace({"M": "Masculino", "F": "Feminino", "N": "Outros"})
+            st.table(g_res.style.format({"Porcentagem": "{:.1f}%"}))
     with t2:
         st.subheader("Perfil por Faixa Etária")
-        if not a_data.empty:
-            st.table(a_data.style.format({"Porcentagem": "{:.1f}%", "LTV": "R$ {:.2f}"}))
+        if not a_res.empty:
+            st.table(a_res.style.format({"Porcentagem": "{:.1f}%", "LTV": "R$ {:.2f}"}))

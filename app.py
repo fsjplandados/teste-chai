@@ -52,8 +52,6 @@ st.markdown("""
         margin-bottom: 32px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
     .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); }
-    .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
-    .kpi-icon svg { width: 20px; height: 20px; stroke: #fff; fill: none; stroke-width: 2; }
     .kpi-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .1em; }
     .kpi-value-container { display: flex; align-items: baseline; gap: 12px; margin: 6px 0; }
     .kpi-value { font-size: 28px; font-weight: 800; color: var(--text-1); letter-spacing: -0.5px; }
@@ -78,7 +76,7 @@ st.markdown(f"""
 # LOGICA DE DADOS
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=600)
-def get_metrics(d_i, d_f, uf, sx):
+def get_dashboard_metrics(d_i, d_f, uf, sx):
     con = duckdb.connect()
     where = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"]
     if uf != "Todas": where.append(f"UF = '{uf}'")
@@ -88,17 +86,15 @@ def get_metrics(d_i, d_f, uf, sx):
     sql_kpis = f"SELECT COUNT(*), AVG(VALOR_TOTAL) FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)}"
     k_res = con.execute(sql_kpis).fetchone()
     
-    # Gênero Dinâmico (Calcula porcentagem para cada valor que existir na coluna SEXO)
-    sql_gen = f"""
-        SELECT SEXO as Gênero, 
-               COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem
-        FROM read_parquet('base_crm_p*.parquet') 
-        WHERE {' AND '.join(where)}
-        GROUP BY SEXO
-        ORDER BY Porcentagem DESC
-    """
+    # Gênero
+    sql_gen = f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)} GROUP BY SEXO ORDER BY Porcentagem DESC"
     g_res = con.execute(sql_gen).df()
-    return k_res, g_res
+    
+    # Faixa Etária
+    sql_age = f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)} GROUP BY FAIXA_ETARIA ORDER BY Faixa ASC"
+    a_res = con.execute(sql_age).df()
+    
+    return k_res, g_res, a_res
 
 # ─────────────────────────────────────────────────────────────
 # INTERFACE
@@ -114,7 +110,7 @@ with st.form("filtros"):
     st.form_submit_button("Aplicar")
 
 d1, d2 = p_range if isinstance(p_range, (list, tuple)) and len(p_range) == 2 else (p_range, p_range)
-k_data, g_data = get_metrics(d1, d2, uf_s, sx_s)
+k_data, g_data, a_data = get_dashboard_metrics(d1, d2, uf_s, sx_s)
 
 # Cards
 def card(label, val, icon_svg, color):
@@ -137,10 +133,13 @@ with c3: card("Ticket Médio", f"R$ {k_data[1]*0.8:,.2f}", i_m, "purple")
 
 if current_page == "Perfil":
     st.write("---")
-    st.subheader("Distribuição por Gênero")
-    if not g_data.empty:
-        # Tradução amigável
-        g_data["Gênero"] = g_data["Gênero"].replace({"M": "Masculino", "F": "Feminino", "N": "Outros"})
-        st.table(g_data.style.format({"Porcentagem": "{:.1f}%"}))
-    else:
-        st.info("Nenhum dado de gênero encontrado para este filtro.")
+    t1, t2 = st.columns(2)
+    with t1:
+        st.subheader("Distribuição por Gênero")
+        if not g_data.empty:
+            g_data["Gênero"] = g_data["Gênero"].replace({"M": "Masculino", "F": "Feminino", "N": "Outros"})
+            st.table(g_data.style.format({"Porcentagem": "{:.1f}%"}))
+    with t2:
+        st.subheader("Distribuição por Faixa Etária")
+        if not a_data.empty:
+            st.table(a_data.style.format({"Porcentagem": "{:.1f}%"}))

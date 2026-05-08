@@ -51,25 +51,34 @@ st.markdown("""
         margin-bottom: 32px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
 
-    /* BOTÃO ATUALIZAR (AZUL VIBRANTE) */
-    div[data-testid="stFormSubmitButton"]:nth-child(1) > button {
-        background-color: var(--blue) !important; color: white !important; border-radius: 10px !important;
-        padding: 10px 24px !important; font-weight: 700 !important; border: none !important;
-        box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important; width: 100% !important; margin-top: 14px !important;
+    /* ESTILO GERAL DOS BOTÕES NO FORM */
+    div[data-testid="stFormSubmitButton"] > button {
+        border-radius: 10px !important;
+        padding: 10px 24px !important;
+        width: 100% !important;
+        margin-top: 14px !important;
+        transition: all 0.3s ease !important;
     }
 
-    /* BOTÃO LIMPAR (AZUL CLARINHO) */
-    div[data-testid="stFormSubmitButton"]:nth-child(2) > button {
-        background-color: rgba(0, 110, 255, 0.08) !important; 
-        color: var(--blue) !important; 
-        border-radius: 10px !important;
-        padding: 10px 24px !important; 
-        font-weight: 600 !important; 
-        border: 1px solid rgba(0, 110, 255, 0.2) !important;
-        width: 100% !important; 
-        margin-top: 14px !important;
+    /* BOTÃO ATUALIZAR (Coluna 4 da linha 2) */
+    div[data-testid="column"]:nth-of-type(4) button {
+        background-color: var(--blue) !important;
+        color: white !important;
+        font-weight: 700 !important;
+        border: none !important;
+        box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important;
     }
-    div[data-testid="stFormSubmitButton"] > button:hover { transform: translateY(-1px) !important; opacity: 0.85; }
+
+    /* BOTÃO LIMPAR FILTROS (Coluna 5 da linha 2) */
+    div[data-testid="column"]:nth-of-type(5) button {
+        background-color: rgba(0, 110, 255, 0.08) !important;
+        color: var(--blue) !important;
+        font-weight: 600 !important;
+        border: 1px solid rgba(0, 110, 255, 0.2) !important;
+        box-shadow: none !important;
+    }
+    
+    div[data-testid="stFormSubmitButton"] > button:hover { transform: translateY(-1px) !important; opacity: 0.9; }
 
     .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
     .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }

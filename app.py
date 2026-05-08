@@ -53,12 +53,8 @@ st.markdown("""
         margin-bottom: 32px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
 
-    /* KPI CARDS FIX */
     .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
-    .kpi-icon { 
-        width: 40px; height: 40px; border-radius: 10px; 
-        display: flex; align-items: center; justify-content: center; margin-bottom: 16px; 
-    }
+    .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
     .kpi-icon svg { width: 20px !important; height: 20px !important; stroke: #fff !important; fill: none !important; stroke-width: 2 !important; }
     
     .kpi-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .1em; }
@@ -90,12 +86,25 @@ def get_dashboard_metrics(d_i, d_f, uf, sx):
     where = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"]
     if uf != "Todas": where.append(f"UF = '{uf}'")
     if sx != "Todas": where.append(f"SEXO = '{sx}'")
+    
     sql_kpis = f"SELECT COUNT(*), AVG(VALOR_TOTAL) FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)}"
     k_res = con.execute(sql_kpis).fetchone()
+    
     sql_gen = f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)} GROUP BY SEXO ORDER BY Porcentagem DESC"
     g_res = con.execute(sql_gen).df()
-    sql_age = f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)} GROUP BY FAIXA_ETARIA ORDER BY Faixa ASC"
+    
+    # Faixa Etária com LTV Médio
+    sql_age = f"""
+        SELECT FAIXA_ETARIA as Faixa, 
+               COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem,
+               AVG(VALOR_TOTAL) as "LTV Médio"
+        FROM read_parquet('base_crm_p*.parquet') 
+        WHERE {' AND '.join(where)} 
+        GROUP BY FAIXA_ETARIA 
+        ORDER BY Faixa ASC
+    """
     a_res = con.execute(sql_age).df()
+    
     return k_res, g_res, a_res
 
 # ─────────────────────────────────────────────────────────────
@@ -134,13 +143,16 @@ with c3: card("Ticket Médio", f"R$ {k_data[1]*0.8:,.2f}", i_m, "purple")
 
 if current_page == "Perfil":
     st.write("---")
-    t1, t2 = st.columns(2)
+    t1, t2 = st.columns([1, 1.5]) # Ajustado o tamanho das colunas para caber o LTV
     with t1:
         st.subheader("Distribuição por Gênero")
         if not g_data.empty:
             g_data["Gênero"] = g_data["Gênero"].replace({"M": "Masculino", "F": "Feminino", "N": "Outros"})
             st.table(g_data.style.format({"Porcentagem": "{:.1f}%"}))
     with t2:
-        st.subheader("Distribuição por Faixa Etária")
+        st.subheader("Perfil por Faixa Etária")
         if not a_data.empty:
-            st.table(a_data.style.format({"Porcentagem": "{:.1f}%"}))
+            st.table(a_data.style.format({
+                "Porcentagem": "{:.1f}%",
+                "LTV Médio": "R$ {:.2f}"
+            }))

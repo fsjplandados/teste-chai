@@ -55,16 +55,13 @@ st.markdown("""
         background-color: var(--blue) !important; color: white !important; border-radius: 10px !important;
         padding: 10px 24px !important; font-weight: 700 !important; border: none !important;
         box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important; transition: all 0.3s ease !important;
-        width: auto !important; margin-top: 14px !important;
     }
-    div[data-testid="stFormSubmitButton"] > button:hover { transform: translateY(-2px) !important; background-color: #0056CC !important; }
 
     .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
     .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
     .kpi-icon svg { width: 20px !important; height: 20px !important; stroke: #fff !important; fill: none !important; stroke-width: 2 !important; }
     .kpi-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .1em; }
-    .kpi-value-container { display: flex; align-items: baseline; gap: 12px; margin: 6px 0; }
-    .kpi-value { font-size: 28px; font-weight: 800; color: var(--text-1); letter-spacing: -0.5px; }
+    .kpi-value { font-size: 28px; font-weight: 800; color: var(--text-1); letter-spacing: -0.5px; margin-top: 6px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -96,7 +93,6 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     elif can == "Digital": where.append("ULTIMA_COMPRA_DIGITAL IS NOT NULL")
     elif can == "Omni": where.append("ULTIMA_COMPRA_OMNI IS NOT NULL")
     
-    # KPIs com Idade Média (Estimada se IDADE não existir)
     sql_kpis = f"""
     SELECT COUNT(*), AVG(VALOR_TOTAL), SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0),
            COUNT(*) * 0.84, COUNT(*) * 0.65,
@@ -134,7 +130,6 @@ with st.form("filtros_globais"):
     uf_sel = r1_c2.selectbox("UF", ["Todas", "RS", "SC", "PR"])
     reg_sel = r1_c3.selectbox("Região", ["Todas", "Serra", "Litoral", "Metropolitana", "Interior"])
     canal_sel = r1_c4.selectbox("Canal", ["Todas", "Loja", "Digital", "Omni"])
-    
     r2_c1, r2_c2, r2_c3, r2_c4 = st.columns([1, 1, 1, 1])
     sexo_sel = r2_c1.selectbox("Sexo", ["Todas", "M", "F"])
     loja_sel = r2_c2.selectbox("Loja", ["Todas", "Loja 01", "Loja 02", "Loja 10"])
@@ -149,7 +144,7 @@ def card(label, val, icon_svg, color):
     <div class="kpi-card">
         <div class="kpi-icon" style="background:var(--{color})">{icon_svg}</div>
         <div class="kpi-label">{label}</div>
-        <div class="kpi-value-container"><div class="kpi-value">{val}</div></div>
+        <div class="kpi-value">{val}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -157,20 +152,22 @@ i_u = '<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4
 i_m = '<svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>'
 i_age = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
 
-# Row 1
-c1, c2, c3 = st.columns(3)
-with c1: card("Clientes Totais", f"{int(k_res[0]):,}", i_u, "text-3")
-with c2: card("LTV Médio", f"R$ {k_res[1]:,.2f}", i_m, "orange")
-with c3: card("Ticket Médio", f"R$ {k_res[2]:,.2f}", i_m, "purple")
-
-# Row 2 (Idade Média adicionada aqui)
-st.write("")
-c4, c5, c6 = st.columns(3)
-with c4: card("Idade Média", f"{int(k_res[5])} anos", i_age, "sky")
-with c5: card("Identificados", f"{int(k_res[3]):,}", i_u, "purple")
-with c6: card("Ativos 90d", f"{int(k_res[4]):,}", i_u, "green")
-
-if current_page == "Perfil":
+if current_page == "Base":
+    # Dashboard CRM - Mostra 6 KPIs
+    c1, c2, c3 = st.columns(3)
+    with c1: card("Clientes Totais", f"{int(k_res[0]):,}", i_u, "text-3")
+    with c2: card("LTV Médio", f"R$ {k_res[1]:,.2f}", i_m, "orange")
+    with c3: card("Ticket Médio", f"R$ {k_res[2]:,.2f}", i_m, "purple")
+    st.write("")
+    c4, c5, c6 = st.columns(3)
+    with c4: card("Idade Média", f"{int(k_res[5])} anos", i_age, "sky")
+    with c5: card("Identificados", f"{int(k_res[3]):,}", i_u, "purple")
+    with c6: card("Ativos 90d", f"{int(k_res[4]):,}", i_u, "green")
+else:
+    # Perfil de Cliente - Apenas Idade Média + Tabelas
+    c1, c2, c3 = st.columns(3)
+    with c1: card("Idade Média", f"{int(k_res[5])} anos", i_age, "sky")
+    
     st.write("---")
     t1, t2 = st.columns([1, 1.5])
     with t1:

@@ -51,35 +51,20 @@ st.markdown("""
         margin-bottom: 32px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
 
-    /* BOTÃO ATUALIZAR (PRIMARY) - AZUL */
     button[kind="primaryFormSubmit"] {
-        background-color: var(--blue) !important;
-        color: white !important;
-        border-radius: 10px !important;
-        padding: 10px 24px !important;
-        font-weight: 700 !important;
-        border: none !important;
-        box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important;
-        width: 100% !important;
-        margin-top: 14px !important;
+        background-color: var(--blue) !important; color: white !important; border-radius: 10px !important;
+        padding: 10px 24px !important; font-weight: 700 !important; border: none !important;
+        box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important; width: 100% !important; margin-top: 14px !important;
     }
 
-    /* BOTÃO LIMPAR FILTROS (SECONDARY) - BRANCO/AZUL CLARINHO */
     button[kind="secondaryFormSubmit"] {
-        background-color: rgba(0, 110, 255, 0.05) !important;
-        color: var(--blue) !important;
-        border-radius: 10px !important;
-        padding: 10px 24px !important;
-        font-weight: 600 !important;
-        border: 1px solid rgba(0, 110, 255, 0.2) !important;
-        box-shadow: none !important;
-        width: 100% !important;
-        margin-top: 14px !important;
+        background-color: rgba(0, 110, 255, 0.05) !important; color: var(--blue) !important; border-radius: 10px !important;
+        padding: 10px 24px !important; font-weight: 600 !important; border: 1px solid rgba(0, 110, 255, 0.2) !important;
+        box-shadow: none !important; width: 100% !important; margin-top: 14px !important;
     }
     
     div[data-testid="stFormSubmitButton"] button:hover { transform: translateY(-1px) !important; opacity: 0.95; }
 
-    /* DESIGN DAS CAIXAS DE KPI */
     .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
     .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
     .kpi-icon svg { width: 20px !important; height: 20px !important; stroke: #fff !important; fill: none !important; stroke-width: 2 !important; }
@@ -108,6 +93,10 @@ st.markdown(f"""
 @st.cache_data(ttl=600)
 def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     con = duckdb.connect()
+    
+    # Verifica se existe arquivo transacional para LTV por Período
+    vendas_exist = os.path.exists("base_vendas_consolidada.parquet")
+    
     where = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"]
     if uf != "Todas": where.append(f"UF = '{uf}'")
     if reg != "Todas": where.append(f"REGIAO = '{reg}'")
@@ -117,8 +106,18 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     elif can == "Digital": where.append("ULTIMA_COMPRA_DIGITAL IS NOT NULL")
     elif can == "Omni": where.append("ULTIMA_COMPRA_OMNI IS NOT NULL")
     
+    # Lógica de Valor: Se tiver vendas, filtra o valor pelo período. Se não, usa o acumulado.
+    valor_col = "VALOR_TOTAL"
+    if vendas_exist:
+        # Cria uma view temporária com as vendas filtradas por período
+        con.execute(f"CREATE TEMP VIEW v_periodo AS SELECT CPF_CNPJ, SUM(VALOR_TOTAL) as VALOR_PERIODO FROM read_parquet('base_vendas_consolidada.parquet') WHERE DATA_VENDA BETWEEN '{d_i}' AND '{d_f}' GROUP BY CPF_CNPJ")
+        source_table = "read_parquet('base_crm_p*.parquet') c LEFT JOIN v_periodo v ON c.CPF_CNPJ = v.CPF_CNPJ"
+        valor_col = "COALESCE(v.VALOR_PERIODO, 0)"
+    else:
+        source_table = "read_parquet('base_crm_p*.parquet')"
+
     sql_kpis = f"""
-    SELECT COUNT(*), AVG(VALOR_TOTAL), SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0),
+    SELECT COUNT(*), AVG({valor_col}), SUM({valor_col}) / NULLIF(SUM(TOTAL_COMPRAS), 0),
            COUNT(*) * 0.84, COUNT(*) * 0.65,
            AVG(CASE 
                 WHEN FAIXA_ETARIA = '0-17' THEN 14
@@ -130,14 +129,14 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
                 WHEN FAIXA_ETARIA = 'Mais de 65' THEN 72
                 ELSE 42
            END) as idade_media
-    FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)}
+    FROM {source_table} WHERE {' AND '.join(where)}
     """
     k_res = con.execute(sql_kpis).fetchone()
     
     sql_gen = f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)} GROUP BY SEXO ORDER BY Porcentagem DESC"
     g_res = con.execute(sql_gen).df()
     
-    sql_age = f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem, AVG(VALOR_TOTAL) as LTV FROM read_parquet('base_crm_p*.parquet') WHERE {' AND '.join(where)} GROUP BY FAIXA_ETARIA ORDER BY Faixa ASC"
+    sql_age = f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem, AVG({valor_col}) as LTV FROM {source_table} WHERE {' AND '.join(where)} GROUP BY FAIXA_ETARIA ORDER BY Faixa ASC"
     a_res = con.execute(sql_age).df()
     
     return k_res, g_res, a_res

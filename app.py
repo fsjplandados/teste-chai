@@ -77,13 +77,18 @@ st.markdown(f"""
 # LOGICA DE DADOS
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=600)
-def get_dashboard_data(d_i, d_f, uf, reg, sx, lj):
+def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can):
     con = duckdb.connect()
     where = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"]
     if uf != "Todas": where.append(f"UF = '{uf}'")
     if reg != "Todas": where.append(f"REGIAO = '{reg}'")
     if sx != "Todas": where.append(f"SEXO = '{sx}'")
     if lj != "Todas": where.append(f"LOJA = '{lj}'")
+    
+    # Lógica de Canal
+    if can == "Loja": where.append("ULTIMA_COMPRA_LOJA IS NOT NULL")
+    elif can == "Digital": where.append("ULTIMA_COMPRA_DIGITAL IS NOT NULL")
+    elif can == "Omni": where.append("ULTIMA_COMPRA_OMNI IS NOT NULL")
     
     sql_kpis = f"""
     SELECT COUNT(*), AVG(VALOR_TOTAL), SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0),
@@ -106,21 +111,22 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj):
 st.markdown(f'<h1 style="font-size:24px; font-weight:800; color:#111827; margin-bottom:20px;">{"Dashboard CRM" if current_page=="Base" else "Perfil de Cliente"}</h1>', unsafe_allow_html=True)
 
 with st.form("filtros_globais"):
-    r1_c1, r1_c2, r1_c3 = st.columns([2, 1, 1])
+    r1_c1, r1_c2, r1_c3, r1_c4 = st.columns([1.5, 1, 1, 1])
     hoje = date.today()
     p_range = r1_c1.date_input("Período", value=(hoje - timedelta(days=90), hoje))
     uf_sel = r1_c2.selectbox("UF", ["Todas", "RS", "SC", "PR"])
     reg_sel = r1_c3.selectbox("Região", ["Todas", "Serra", "Litoral", "Metropolitana", "Interior"])
+    canal_sel = r1_c4.selectbox("Canal", ["Todas", "Loja", "Digital", "Omni"])
     
     r2_c1, r2_c2, r2_c3 = st.columns([1, 1, 2])
     sexo_sel = r2_c1.selectbox("Sexo", ["Todas", "M", "F"])
     loja_sel = r2_c2.selectbox("Loja", ["Todas", "Loja 01", "Loja 02", "Loja 10", "Digital"])
-    r2_c3.write("") # Espaçador
+    
     if r2_c3.form_submit_button("📊 Atualizar Dashboard", use_container_width=True):
-        st.toast("Dados atualizados com sucesso!")
+        st.toast("Filtros aplicados!")
 
 d1, d2 = p_range if isinstance(p_range, (list, tuple)) and len(p_range) == 2 else (p_range, p_range)
-k_res, g_res, a_res = get_dashboard_data(d1, d2, uf_sel, reg_sel, sexo_sel, loja_sel)
+k_res, g_res, a_res = get_dashboard_data(d1, d2, uf_sel, reg_sel, sexo_sel, loja_sel, canal_sel)
 
 def card(label, val, icon_svg, color):
     st.markdown(f"""

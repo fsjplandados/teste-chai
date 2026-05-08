@@ -18,7 +18,6 @@ st.markdown("""
     :root {
         --blue: #006EFF; --bg: #F0F4F8; --card-bg: #FFF; --border: #E5E7EB;
         --text-1: #111827; --text-2: #6B7280; --text-3: #9CA3AF;
-        --purple: #7C3AED; --sky: #0EA5E9; --green: #10B981; --red: #EF4444; --orange: #F97316;
     }
     .stApp { background-color: var(--bg) !important; font-family: 'Inter', sans-serif !important; }
     [data-testid="stSidebar"], [data-testid="stHeader"], [data-testid="stDecoration"] { display: none !important; }
@@ -51,34 +50,33 @@ st.markdown("""
         margin-bottom: 32px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.03) !important;
     }
 
-    /* ESTILO BASE PARA TODOS OS BOTÕES DO FORM */
-    div[data-testid="stForm"] button {
-        border-radius: 10px !important;
-        padding: 10px 24px !important;
-        width: 100% !important;
-        margin-top: 14px !important;
-        transition: all 0.3s ease !important;
-    }
-
-    /* O PRIMEIRO BOTÃO DE FORMULÁRIO (ATUALIZAR) SEMPRE AZUL */
-    div[data-testid="stForm"] div[data-testid="stFormSubmitButton"]:first-of-type button {
+    /* BOTÃO ATUALIZAR (PRIMARY) - AZUL */
+    button[kind="primaryFormSubmit"] {
         background-color: var(--blue) !important;
         color: white !important;
+        border-radius: 10px !important;
+        padding: 10px 24px !important;
         font-weight: 700 !important;
         border: none !important;
         box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important;
+        width: 100% !important;
+        margin-top: 14px !important;
     }
 
-    /* O SEGUNDO BOTÃO DE FORMULÁRIO (LIMPAR) SEMPRE AZUL CLARINHO */
-    div[data-testid="stForm"] div[data-testid="stFormSubmitButton"]:nth-of-type(2) button {
-        background-color: rgba(0, 110, 255, 0.08) !important;
+    /* BOTÃO LIMPAR FILTROS (SECONDARY) - BRANCO/AZUL CLARO */
+    button[kind="secondaryFormSubmit"] {
+        background-color: #fff !important;
         color: var(--blue) !important;
+        border-radius: 10px !important;
+        padding: 10px 24px !important;
         font-weight: 600 !important;
-        border: 1px solid rgba(0, 110, 255, 0.2) !important;
+        border: 1px solid var(--blue) !important;
         box-shadow: none !important;
+        width: 100% !important;
+        margin-top: 14px !important;
     }
     
-    div[data-testid="stForm"] button:hover { transform: translateY(-1px) !important; opacity: 0.9; }
+    div[data-testid="stFormSubmitButton"] button:hover { transform: translateY(-1px) !important; opacity: 0.95; }
 
     .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
     .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
@@ -159,8 +157,9 @@ with st.form("filtros_globais"):
     loja_sel = r2_c2.selectbox("Loja", ["Todas", "Loja 01", "Loja 02", "Loja 10"])
     digital_sel = r2_c3.selectbox("Digital", ["Todos", "E-commerce", "APP", "SITE", "iFood"])
     
-    btn_atu = r2_c4.form_submit_button("Atualizar")
-    btn_lim = r2_c5.form_submit_button("Limpar filtros")
+    # ATUALIZAR = PRIMARY (Azul) | LIMPAR = SECONDARY (Branco)
+    btn_atu = r2_c4.form_submit_button("Atualizar", type="primary")
+    btn_lim = r2_c5.form_submit_button("Limpar filtros", type="secondary")
     
     if btn_lim:
         st.query_params.update({"p": current_page})

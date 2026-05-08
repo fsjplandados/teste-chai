@@ -46,25 +46,29 @@ st.markdown(f"""
 @st.cache_data(ttl=600)
 def get_metrics(d_i, d_f, uf, sx):
     con = duckdb.connect()
-    # Verifica se o novo arquivo de vendas existe, senão usa o de clientes
-    file = "base_vendas_consolidada.parquet" if os.path.exists("base_vendas_consolidada.parquet") else "base_crm_p*.parquet"
-    col_data = "DATA_VENDA" if "vendas" in file else "ULTIMA_COMPRA_GERAL"
-    col_valor = "VENDA_PERIODO" if "vendas" in file else "VALOR_TOTAL"
+    # Detecta qual arquivo usar
+    vendas_exist = os.path.exists("base_vendas_consolidada.parquet")
+    file = "base_vendas_consolidada.parquet" if vendas_exist else "base_crm_p*.parquet"
+    
+    # Define as colunas e a forma de contar clientes
+    col_data = "DATA_VENDA" if vendas_exist else "ULTIMA_COMPRA_GERAL"
+    col_valor = "VENDA_PERIODO" if vendas_exist else "VALOR_TOTAL"
+    count_distinct = "COUNT(DISTINCT CPF_CNPJ)" if vendas_exist else "COUNT(*)"
     
     where = [f"{col_data} BETWEEN '{d_i}' AND '{d_f}'"]
     if uf != "Todas": where.append(f"UF = '{uf}'")
     if sx != "Todas": where.append(f"SEXO = '{sx}'")
     
     # KPIs
-    sql = f"SELECT COUNT(DISTINCT CPF_CNPJ), SUM({col_valor}) / COUNT(DISTINCT CPF_CNPJ) FROM read_parquet('{file}') WHERE {' AND '.join(where)}"
+    sql = f"SELECT {count_distinct}, SUM({col_valor}) / {count_distinct} FROM read_parquet('{file}') WHERE {' AND '.join(where)}"
     res = con.execute(sql).fetchone()
     
     # Gênero
-    sql_gen = f"SELECT SEXO as Gênero, COUNT(DISTINCT CPF_CNPJ) * 100.0 / SUM(COUNT(DISTINCT CPF_CNPJ)) OVER() as Porcentagem FROM read_parquet('{file}') WHERE {' AND '.join(where)} GROUP BY SEXO"
+    sql_gen = f"SELECT SEXO as Gênero, {count_distinct} * 100.0 / SUM({count_distinct}) OVER() as Porcentagem FROM read_parquet('{file}') WHERE {' AND '.join(where)} GROUP BY SEXO"
     g_df = con.execute(sql_gen).df()
     
-    # Faixa Etária (Igual ao seu SQL do Snowflake)
-    sql_age = f"SELECT FAIXA_ETARIA as Faixa, COUNT(DISTINCT CPF_CNPJ) as Clientes, AVG({col_valor}) as LTV FROM read_parquet('{file}') WHERE {' AND '.join(where)} GROUP BY FAIXA_ETARIA ORDER BY Faixa"
+    # Faixa Etária
+    sql_age = f"SELECT FAIXA_ETARIA as Faixa, {count_distinct} as Clientes, AVG({col_valor}) as LTV FROM read_parquet('{file}') WHERE {' AND '.join(where)} GROUP BY FAIXA_ETARIA ORDER BY Faixa"
     a_df = con.execute(sql_age).df()
     
     return res, g_df, a_df

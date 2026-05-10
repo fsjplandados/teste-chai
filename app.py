@@ -104,28 +104,39 @@ def run_query(con, source, d1, d2, uf, reg, sx, lj):
     sql = f"SELECT COUNT(*), AVG(VALOR_TOTAL), SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0), SUM(VALOR_TOTAL) FROM {source} WHERE {where_str}"
     return con.execute(sql).fetchone()
 
+def get_trend_data(con, source, d1, d2, uf, sx):
+    where = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d1}' AND '{d2}'"]
+    if uf != "Todas": where.append(f"UF = '{uf}'")
+    if sx != "Todas": where.append(f"SEXO = '{sx}'")
+    where_str = " AND ".join(where)
+    sql = f"SELECT ULTIMA_COMPRA_GERAL as Data, COUNT(*) as Clientes FROM {source} WHERE {where_str} GROUP BY 1 ORDER BY 1"
+    return con.execute(sql).df()
+
 @st.cache_data(ttl=600)
 def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     con = duckdb.connect()
     source = "read_parquet('base_crm_p*.parquet')"
+    
     current = run_query(con, source, d_i, d_f, uf, reg, sx, lj)
     delta_days = (d_f - d_i).days + 1
     d_i_mom, d_f_mom = d_i - timedelta(days=delta_days), d_i - timedelta(days=1)
-    prev_mom = run_query(con, source, d_i_mom, d_f_mom, uf, reg, sx, lj)
+    prev_mom_res = run_query(con, source, d_i_mom, d_f_mom, uf, reg, sx, lj)
     d_i_yoy, d_f_yoy = d_i - relativedelta(years=1), d_f - relativedelta(years=1)
-    prev_yoy = run_query(con, source, d_i_yoy, d_f_yoy, uf, reg, sx, lj)
+    prev_yoy_res = run_query(con, source, d_i_yoy, d_f_yoy, uf, reg, sx, lj)
     
-    where_c = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"]
-    if uf != "Todas": where_c.append(f"UF = '{uf}'")
-    if sx != "Todas": where_c.append(f"SEXO = '{sx}'")
-    where_str = " AND ".join(where_c)
-    sql_evol = f"SELECT ULTIMA_COMPRA_GERAL as Data, COUNT(*) as Clientes FROM {source} WHERE {where_str} GROUP BY 1 ORDER BY 1"
-    evol_df = con.execute(sql_evol).df()
+    # Séries para o gráfico comparativo
+    curr_trend = get_trend_data(con, source, d_i, d_f, uf, sx)
+    prev_trend = get_trend_data(con, source, d_i_mom, d_f_mom, uf, sx)
     
-    g_res = con.execute(f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM {source} WHERE {where_str} GROUP BY SEXO").df()
-    a_res = con.execute(f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem, AVG(VALOR_TOTAL) as LTV FROM {source} WHERE {where_str} GROUP BY FAIXA_ETARIA ORDER BY Faixa").df()
-    idade_media = con.execute(f"SELECT AVG(CASE WHEN FAIXA_ETARIA = '0-17' THEN 14 WHEN FAIXA_ETARIA = '18-25' THEN 22 WHEN FAIXA_ETARIA = '26-35' THEN 30 WHEN FAIXA_ETARIA = '36-45' THEN 40 WHEN FAIXA_ETARIA = '46-55' THEN 50 WHEN FAIXA_ETARIA = '56-65' THEN 60 WHEN FAIXA_ETARIA = 'Mais de 65' THEN 72 ELSE 42 END) FROM {source} WHERE {where_str}").fetchone()[0]
-    return {"current": current, "prev_mom": prev_mom, "prev_yoy": prev_yoy, "evol_df": evol_df, "g_res": g_res, "a_res": a_res, "idade_media": idade_media}
+    # Adicionar "Dia do Período" para alinhar no gráfico
+    curr_trend['DayIdx'] = range(len(curr_trend))
+    prev_trend['DayIdx'] = range(len(prev_trend))
+    
+    g_res = con.execute(f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM {source} WHERE ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}' GROUP BY SEXO").df()
+    a_res = con.execute(f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem, AVG(VALOR_TOTAL) as LTV FROM {source} WHERE ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}' GROUP BY FAIXA_ETARIA ORDER BY Faixa").df()
+    idade_media = con.execute(f"SELECT AVG(CASE WHEN FAIXA_ETARIA = '0-17' THEN 14 WHEN FAIXA_ETARIA = '18-25' THEN 22 WHEN FAIXA_ETARIA = '26-35' THEN 30 WHEN FAIXA_ETARIA = '36-45' THEN 40 WHEN FAIXA_ETARIA = '46-55' THEN 50 WHEN FAIXA_ETARIA = '56-65' THEN 60 WHEN FAIXA_ETARIA = 'Mais de 65' THEN 72 ELSE 42 END) FROM {source} WHERE ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'").fetchone()[0]
+    
+    return {"current": current, "prev_mom": prev_mom_res, "prev_yoy": prev_yoy_res, "curr_trend": curr_trend, "prev_trend": prev_trend, "g_res": g_res, "a_res": a_res, "idade_media": idade_media}
 
 # ─────────────────────────────────────────────────────────────
 # INTERFACE
@@ -134,6 +145,7 @@ st.markdown(f'<h1 style="font-size:24px; font-weight:800; color:#111827; margin-
 
 with st.form("filtros_globais"):
     r1_c1, r1_c2, r1_c3, r1_c4 = st.columns([1.5, 1, 1, 1])
+    hoje = date(2026, 4, 30)
     p_range = r1_c1.date_input("Período", value=(date(2026, 4, 1), date(2026, 4, 30)))
     uf_sel = r1_c2.selectbox("UF", ["Todas", "RS", "SC", "PR"])
     reg_sel = r1_c3.selectbox("Região", ["Todas", "Serra", "Litoral", "Metropolitana", "Interior"])
@@ -172,12 +184,16 @@ try:
         with c2: card("LTV Médio", f"R$ {data['current'][1]:,.2f}", i_m, "orange", data['current'][1], data['prev_mom'][1], data['prev_yoy'][1])
         with c3: card("Ticket Médio", f"R$ {data['current'][2]:,.2f}", i_m, "purple", data['current'][2], data['prev_mom'][2], data['prev_yoy'][2])
         
-        # GRAFICO PREMIUM PLOTLY
-        st.markdown('<div class="chart-box"><div class="chart-title">Evolução da Base Total</div>', unsafe_allow_html=True)
-        if not data['evol_df'].empty:
+        # GRAFICO COMPARATIVO PREMIUM
+        st.markdown('<div class="chart-box"><div class="chart-title">Evolução da Base vs Período Anterior</div>', unsafe_allow_html=True)
+        if not data['curr_trend'].empty:
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=data['evol_df']['Data'], y=data['evol_df']['Clientes'], mode='lines', fill='tozeroy', line=dict(color='#006EFF', width=3), fillcolor='rgba(0, 110, 255, 0.1)', hoverinfo='x+y', name='Clientes'))
-            fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=300, showlegend=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(showgrid=False, showline=False, zeroline=False, tickfont=dict(family='Inter', size=10, color='#9CA3AF')), yaxis=dict(showgrid=True, gridcolor='#F3F4F6', showline=False, zeroline=False, tickfont=dict(family='Inter', size=10, color='#9CA3AF')), hovermode='x unified')
+            # Série Período Anterior (Pontilhada)
+            fig.add_trace(go.Scatter(x=data['curr_trend']['Data'], y=data['prev_trend']['Clientes'] if not data['prev_trend'].empty else [0]*len(data['curr_trend']), mode='lines', line=dict(color='#9CA3AF', width=2, dash='dot'), name='Período Anterior', hoverinfo='skip'))
+            # Série Atual (Sólida com preenchimento)
+            fig.add_trace(go.Scatter(x=data['curr_trend']['Data'], y=data['curr_trend']['Clientes'], mode='lines', fill='tozeroy', line=dict(color='#006EFF', width=3), fillcolor='rgba(0, 110, 255, 0.05)', name='Período Selecionado', hovertemplate='<b>%{x}</b><br>Clientes: %{y:,.0f}'))
+            
+            fig.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=300, showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, font=dict(family='Inter', size=11, color='#6B7280')), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(showgrid=False, showline=False, tickfont=dict(family='Inter', size=10, color='#9CA3AF')), yaxis=dict(showgrid=True, gridcolor='#F3F4F6', tickfont=dict(family='Inter', size=10, color='#9CA3AF'), tickprefix='', tickformat=',.0f'), hovermode='x unified')
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         st.markdown('</div>', unsafe_allow_html=True)
 

@@ -124,13 +124,8 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     d_i_yoy, d_f_yoy = d_i - relativedelta(years=1), d_f - relativedelta(years=1)
     prev_yoy_res = run_query(con, source, d_i_yoy, d_f_yoy, uf, reg, sx, lj)
     
-    # Séries para o gráfico comparativo
     curr_trend = get_trend_data(con, source, d_i, d_f, uf, sx)
     prev_trend = get_trend_data(con, source, d_i_mom, d_f_mom, uf, sx)
-    
-    # Adicionar "Dia do Período" para alinhar no gráfico
-    curr_trend['DayIdx'] = range(len(curr_trend))
-    prev_trend['DayIdx'] = range(len(prev_trend))
     
     g_res = con.execute(f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM {source} WHERE ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}' GROUP BY SEXO").df()
     a_res = con.execute(f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem, AVG(VALOR_TOTAL) as LTV FROM {source} WHERE ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}' GROUP BY FAIXA_ETARIA ORDER BY Faixa").df()
@@ -184,16 +179,21 @@ try:
         with c2: card("LTV Médio", f"R$ {data['current'][1]:,.2f}", i_m, "orange", data['current'][1], data['prev_mom'][1], data['prev_yoy'][1])
         with c3: card("Ticket Médio", f"R$ {data['current'][2]:,.2f}", i_m, "purple", data['current'][2], data['prev_mom'][2], data['prev_yoy'][2])
         
-        # GRAFICO COMPARATIVO PREMIUM
+        # GRAFICO COMPARATIVO COM HOVER CIRCLE E FUNDO BRANCO
         st.markdown('<div class="chart-box"><div class="chart-title">Evolução da Base vs Período Anterior</div>', unsafe_allow_html=True)
         if not data['curr_trend'].empty:
             fig = go.Figure()
-            # Série Período Anterior (Pontilhada)
-            fig.add_trace(go.Scatter(x=data['curr_trend']['Data'], y=data['prev_trend']['Clientes'] if not data['prev_trend'].empty else [0]*len(data['curr_trend']), mode='lines', line=dict(color='#9CA3AF', width=2, dash='dot'), name='Período Anterior', hoverinfo='skip'))
-            # Série Atual (Sólida com preenchimento)
-            fig.add_trace(go.Scatter(x=data['curr_trend']['Data'], y=data['curr_trend']['Clientes'], mode='lines', fill='tozeroy', line=dict(color='#006EFF', width=3), fillcolor='rgba(0, 110, 255, 0.05)', name='Período Selecionado', hovertemplate='<b>%{x}</b><br>Clientes: %{y:,.0f}'))
+            # Período Anterior
+            fig.add_trace(go.Scatter(x=data['curr_trend']['Data'], y=data['prev_trend']['Clientes'] if not data['prev_trend'].empty else [0]*len(data['curr_trend']), mode='lines', line=dict(color='#E5E7EB', width=2, dash='dot'), name='Período Anterior', hoverinfo='skip'))
+            # Período Atual
+            fig.add_trace(go.Scatter(x=data['curr_trend']['Data'], y=data['curr_trend']['Clientes'], mode='lines+markers', fill='tozeroy', line=dict(color='#006EFF', width=3), fillcolor='rgba(0, 110, 255, 0.04)', marker=dict(size=8, color='#006EFF', opacity=0), # Opacidade 0 para esconder, mas aparecer no hover
+                name='Período Selecionado', hovertemplate='<b>%{x}</b><br>Clientes: %{y:,.0f}'))
             
-            fig.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=300, showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, font=dict(family='Inter', size=11, color='#6B7280')), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(showgrid=False, showline=False, tickfont=dict(family='Inter', size=10, color='#9CA3AF')), yaxis=dict(showgrid=True, gridcolor='#F3F4F6', tickfont=dict(family='Inter', size=10, color='#9CA3AF'), tickprefix='', tickformat=',.0f'), hovermode='x unified')
+            fig.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=300, showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="left", x=0, font=dict(family='Inter', size=11, color='#6B7280')), paper_bgcolor='#FFFFFF', # Fundo branco puro
+                plot_bgcolor='#FFFFFF', # Fundo branco puro
+                xaxis=dict(showgrid=False, showline=False, tickfont=dict(family='Inter', size=10, color='#9CA3AF')), yaxis=dict(showgrid=True, gridcolor='#F3F4F6', tickfont=dict(family='Inter', size=10, color='#9CA3AF'), tickformat=',.0f'), hovermode='x unified')
+            # Configuração para mostrar marcador no hover
+            fig.update_traces(hoverlabel=dict(bgcolor="white", font_size=12, font_family="Inter"), marker=dict(opacity=0), selector=dict(mode='lines+markers'))
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         st.markdown('</div>', unsafe_allow_html=True)
 

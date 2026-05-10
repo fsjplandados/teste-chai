@@ -65,11 +65,11 @@ st.markdown("""
     .kpi-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .1em; }
     .kpi-value { font-size: 28px; font-weight: 800; color: var(--text-1); letter-spacing: -0.5px; margin: 4px 0; }
     
-    /* UNIFICADO: Único card branco para Titulo + Gráfico */
-    .unified-chart-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 32px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 32px; }
-    .chart-header { display: flex; align-items: center; gap: 8px; margin-bottom: 24px; }
+    /* CARD UNIFICADO REAL */
+    .unified-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 32px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 32px; }
+    .chart-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
     .chart-header::before { content: ''; width: 4px; height: 16px; background: var(--blue); border-radius: 2px; }
-    .chart-label { font-size: 10px; font-weight: 700; color: var(--text-1); text-transform: uppercase; letter-spacing: .1em; margin: 0; }
+    .chart-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .1em; margin: 0; }
 
     .indicators { display: flex; gap: 12px; margin-top: 12px; border-top: 1px solid #f3f4f6; padding-top: 12px; }
     .ind-item { display: flex; flex-direction: column; gap: 2px; }
@@ -118,21 +118,17 @@ def get_trend_data(con, source, d1, d2, uf, sx):
 def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     con = duckdb.connect()
     source = "read_parquet('base_crm_p*.parquet')"
-    
     current = run_query(con, source, d_i, d_f, uf, reg, sx, lj)
     delta_days = (d_f - d_i).days + 1
     d_i_mom, d_f_mom = d_i - timedelta(days=delta_days), d_i - timedelta(days=1)
     prev_mom_res = run_query(con, source, d_i_mom, d_f_mom, uf, reg, sx, lj)
     d_i_yoy, d_f_yoy = d_i - relativedelta(years=1), d_f - relativedelta(years=1)
     prev_yoy_res = run_query(con, source, d_i_yoy, d_f_yoy, uf, reg, sx, lj)
-    
     curr_trend = get_trend_data(con, source, d_i, d_f, uf, sx)
     prev_trend = get_trend_data(con, source, d_i_mom, d_f_mom, uf, sx)
-    
     g_res = con.execute(f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM {source} WHERE ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}' GROUP BY SEXO").df()
     a_res = con.execute(f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem, AVG(VALOR_TOTAL) as LTV FROM {source} WHERE ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}' GROUP BY FAIXA_ETARIA ORDER BY Faixa").df()
     idade_media = con.execute(f"SELECT AVG(CASE WHEN FAIXA_ETARIA = '0-17' THEN 14 WHEN FAIXA_ETARIA = '18-25' THEN 22 WHEN FAIXA_ETARIA = '26-35' THEN 30 WHEN FAIXA_ETARIA = '36-45' THEN 40 WHEN FAIXA_ETARIA = '46-55' THEN 50 WHEN FAIXA_ETARIA = '56-65' THEN 60 WHEN FAIXA_ETARIA = 'Mais de 65' THEN 72 ELSE 42 END) FROM {source} WHERE ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'").fetchone()[0]
-    
     return {"current": current, "prev_mom": prev_mom_res, "prev_yoy": prev_yoy_res, "curr_trend": curr_trend, "prev_trend": prev_trend, "g_res": g_res, "a_res": a_res, "idade_media": idade_media}
 
 # ─────────────────────────────────────────────────────────────
@@ -142,7 +138,6 @@ st.markdown(f'<h1 style="font-size:24px; font-weight:800; color:#111827; margin-
 
 with st.form("filtros_globais"):
     r1_c1, r1_c2, r1_c3, r1_c4 = st.columns([1.5, 1, 1, 1])
-    hoje = date(2026, 4, 30)
     p_range = r1_c1.date_input("Período", value=(date(2026, 4, 1), date(2026, 4, 30)))
     uf_sel = r1_c2.selectbox("UF", ["Todas", "RS", "SC", "PR"])
     reg_sel = r1_c3.selectbox("Região", ["Todas", "Serra", "Litoral", "Metropolitana", "Interior"])
@@ -181,21 +176,29 @@ try:
         with c2: card("LTV Médio", f"R$ {data['current'][1]:,.2f}", i_m, "orange", data['current'][1], data['prev_mom'][1], data['prev_yoy'][1])
         with c3: card("Ticket Médio", f"R$ {data['current'][2]:,.2f}", i_m, "purple", data['current'][2], data['prev_mom'][2], data['prev_yoy'][2])
         
-        # CARD UNIFICADO (TITULO + GRAFICO)
-        st.markdown('<div class="unified-chart-card"><div class="chart-header"><h3 class="chart-label">Evolução da Base vs Período Anterior</h3></div>', unsafe_allow_html=True)
-        if not data['curr_trend'].empty:
-            fig = go.Figure()
-            # Período Anterior
-            fig.add_trace(go.Scatter(x=data['curr_trend']['Data'], y=data['prev_trend']['Clientes'] if not data['prev_trend'].empty else [0]*len(data['curr_trend']), mode='lines', line=dict(color='#E5E7EB', width=2, dash='dot'), name='Período Anterior', hoverinfo='skip'))
-            # Período Selecionado (com Ponto de Foco/Mira no Hover)
-            fig.add_trace(go.Scatter(x=data['curr_trend']['Data'], y=data['curr_trend']['Clientes'], mode='lines', fill='tozeroy', line=dict(color='#006EFF', width=3), fillcolor='rgba(0, 110, 255, 0.04)', name='Período Selecionado', hovertemplate='<b>%{x}</b><br>Clientes: %{y:,.0f}'))
-            
-            fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=350, showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="left", x=0, font=dict(family='Inter', size=11, color='#6B7280')), paper_bgcolor='white', plot_bgcolor='white', xaxis=dict(showgrid=False, showline=False, tickfont=dict(family='Inter', size=10, color='#9CA3AF')), yaxis=dict(showgrid=True, gridcolor='#F3F4F6', tickfont=dict(family='Inter', size=10, color='#9CA3AF'), tickformat=',.0f'), hovermode='x unified', spikedistance=-1, hoverdistance=100)
-            
-            # Efeito Mira: Bolinha azul sólida com borda branca no hover
-            fig.update_traces(marker=dict(size=10, color='#006EFF', opacity=1, line=dict(width=2, color='white')), selector=dict(name='Período Selecionado'))
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        st.markdown('</div>', unsafe_allow_html=True)
+        # ─── SOLUÇÃO DE UNIFICAÇÃO REAL ───
+        # Injetamos o estilo para o container que o Streamlit cria automaticamente
+        st.markdown("""
+        <style>
+            [data-testid="stVerticalBlock"] > div:nth-child(4) [data-testid="stVerticalBlock"] {
+                background: white !important;
+                border: 1px solid #E5E7EB !important;
+                border-radius: 18px !important;
+                padding: 32px !important;
+                box-shadow: 0 2px 16px rgba(0,0,0,0.04) !important;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        with st.container():
+            st.markdown('<div class="chart-header"><h3 class="chart-label">Evolução da Base vs Período Anterior</h3></div>', unsafe_allow_html=True)
+            if not data['curr_trend'].empty:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=data['curr_trend']['Data'], y=data['prev_trend']['Clientes'] if not data['prev_trend'].empty else [0]*len(data['curr_trend']), mode='lines', line=dict(color='#E5E7EB', width=2, dash='dot'), name='Período Anterior', hoverinfo='skip'))
+                fig.add_trace(go.Scatter(x=data['curr_trend']['Data'], y=data['curr_trend']['Clientes'], mode='lines', fill='tozeroy', line=dict(color='#006EFF', width=3), fillcolor='rgba(0, 110, 255, 0.04)', name='Período Selecionado', hovertemplate='<b>%{x}</b><br>Clientes: %{y:,.0f}'))
+                fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=350, showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="left", x=0, font=dict(family='Inter', size=11, color='#6B7280')), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(showgrid=False, showline=False, tickfont=dict(family='Inter', size=10, color='#9CA3AF')), yaxis=dict(showgrid=True, gridcolor='#F3F4F6', tickfont=dict(family='Inter', size=10, color='#9CA3AF'), tickformat=',.0f'), hovermode='x unified', spikedistance=-1, hoverdistance=100)
+                fig.update_traces(marker=dict(size=10, color='#006EFF', opacity=1, line=dict(width=2, color='white')), selector=dict(name='Período Selecionado'))
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
         c4, c5, c6 = st.columns(3)
         with c4: card("Receita Total (ARPU)", f"R$ {data['current'][3]:,.2f}", i_rev, "sky", data['current'][3], data['prev_mom'][3], data['prev_yoy'][3])

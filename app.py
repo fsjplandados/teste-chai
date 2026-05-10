@@ -58,18 +58,15 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(0, 110, 255, 0.3) !important; width: 100% !important; margin-top: 14px !important;
     }
 
-    button[kind="secondaryFormSubmit"] {
-        background-color: rgba(0, 110, 255, 0.05) !important; color: var(--blue) !important; border-radius: 10px !important;
-        padding: 10px 24px !important; font-weight: 600 !important; border: 1px solid rgba(0, 110, 255, 0.2) !important;
-        box-shadow: none !important; width: 100% !important; margin-top: 14px !important;
-    }
-    
     .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
     .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
     .kpi-icon svg { width: 20px; height: 20px; stroke: #fff; fill: none; stroke-width: 2; }
     .kpi-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .1em; }
     .kpi-value { font-size: 28px; font-weight: 800; color: var(--text-1); letter-spacing: -0.5px; margin: 4px 0; }
     
+    .chart-box { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 32px; }
+    .chart-title { font-size: 14px; font-weight: 700; color: var(--text-1); margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.05em; }
+
     .indicators { display: flex; gap: 12px; margin-top: 12px; border-top: 1px solid #f3f4f6; padding-top: 12px; }
     .ind-item { display: flex; flex-direction: column; gap: 2px; }
     .ind-label { font-size: 9px; font-weight: 600; color: var(--text-3); text-transform: uppercase; }
@@ -103,7 +100,6 @@ def run_query(con, source, d1, d2, uf, reg, sx, lj):
     if lj != "Todas": where.append(f"LOJA = '{lj}'")
     where_str = " AND ".join(where)
     
-    # KPIs: Clientes, LTV Médio, Ticket Médio, Receita Total (ARPU Base)
     sql = f"SELECT COUNT(*), AVG(VALOR_TOTAL), SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0), SUM(VALOR_TOTAL) FROM {source} WHERE {where_str}"
     return con.execute(sql).fetchone()
 
@@ -119,16 +115,21 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     d_i_yoy, d_f_yoy = d_i - relativedelta(years=1), d_f - relativedelta(years=1)
     prev_yoy = run_query(con, source, d_i_yoy, d_f_yoy, uf, reg, sx, lj)
     
-    where_curr = f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"
-    if uf != "Todas": where_curr += f" AND UF = '{uf}'"
-    if sx != "Todas": where_curr += f" AND SEXO = '{sx}'"
+    # Dados para o gráfico de evolução
+    where_c = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"]
+    if uf != "Todas": where_c.append(f"UF = '{uf}'")
+    if sx != "Todas": where_c.append(f"SEXO = '{sx}'")
+    where_str = " AND ".join(where_c)
     
-    g_res = con.execute(f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM {source} WHERE {where_curr} GROUP BY SEXO").df()
-    a_res = con.execute(f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem, AVG(VALOR_TOTAL) as LTV FROM {source} WHERE {where_curr} GROUP BY FAIXA_ETARIA ORDER BY Faixa").df()
+    sql_evol = f"SELECT ULTIMA_COMPRA_GERAL as Data, COUNT(*) as Clientes FROM {source} WHERE {where_str} GROUP BY 1 ORDER BY 1"
+    evol_df = con.execute(sql_evol).df()
     
-    idade_media = con.execute(f"SELECT AVG(CASE WHEN FAIXA_ETARIA = '0-17' THEN 14 WHEN FAIXA_ETARIA = '18-25' THEN 22 WHEN FAIXA_ETARIA = '26-35' THEN 30 WHEN FAIXA_ETARIA = '36-45' THEN 40 WHEN FAIXA_ETARIA = '46-55' THEN 50 WHEN FAIXA_ETARIA = '56-65' THEN 60 WHEN FAIXA_ETARIA = 'Mais de 65' THEN 72 ELSE 42 END) FROM {source} WHERE {where_curr}").fetchone()[0]
+    g_res = con.execute(f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM {source} WHERE {where_str} GROUP BY SEXO").df()
+    a_res = con.execute(f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem, AVG(VALOR_TOTAL) as LTV FROM {source} WHERE {where_str} GROUP BY FAIXA_ETARIA ORDER BY Faixa").df()
+    
+    idade_media = con.execute(f"SELECT AVG(CASE WHEN FAIXA_ETARIA = '0-17' THEN 14 WHEN FAIXA_ETARIA = '18-25' THEN 22 WHEN FAIXA_ETARIA = '26-35' THEN 30 WHEN FAIXA_ETARIA = '36-45' THEN 40 WHEN FAIXA_ETARIA = '46-55' THEN 50 WHEN FAIXA_ETARIA = '56-65' THEN 60 WHEN FAIXA_ETARIA = 'Mais de 65' THEN 72 ELSE 42 END) FROM {source} WHERE {where_str}").fetchone()[0]
 
-    return {"current": current, "prev_mom": prev_mom, "prev_yoy": prev_yoy, "g_res": g_res, "a_res": a_res, "idade_media": idade_media}
+    return {"current": current, "prev_mom": prev_mom, "prev_yoy": prev_yoy, "evol_df": evol_df, "g_res": g_res, "a_res": a_res, "idade_media": idade_media}
 
 # ─────────────────────────────────────────────────────────────
 # INTERFACE
@@ -137,7 +138,6 @@ st.markdown(f'<h1 style="font-size:24px; font-weight:800; color:#111827; margin-
 
 with st.form("filtros_globais"):
     r1_c1, r1_c2, r1_c3, r1_c4 = st.columns([1.5, 1, 1, 1])
-    hoje = date(2026, 4, 30)
     p_range = r1_c1.date_input("Período", value=(date(2026, 4, 1), date(2026, 4, 30)))
     uf_sel = r1_c2.selectbox("UF", ["Todas", "RS", "SC", "PR"])
     reg_sel = r1_c3.selectbox("Região", ["Todas", "Serra", "Litoral", "Metropolitana", "Interior"])
@@ -173,8 +173,8 @@ try:
             <div class="kpi-label">{label}</div>
             <div class="kpi-value">{val}</div>
             <div class="indicators">
-                <div class="ind-item"><div class="ind-label">Crescimento</div><div class="ind-val">{fmt_ind(d_mom)}</div></div>
-                <div class="ind-item"><div class="ind-label">Evolução</div><div class="ind-val">{fmt_ind(d_yoy)}</div></div>
+                <div class="ind-item"><div class="ind-label">Mês Anterior</div><div class="ind-val">{fmt_ind(d_mom)}</div></div>
+                <div class="ind-item"><div class="ind-label">Ano Anterior</div><div class="ind-val">{fmt_ind(d_yoy)}</div></div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -184,11 +184,20 @@ try:
     i_rev = '<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>'
 
     if current_page == "Base":
+        # KPIs
         c1, c2, c3 = st.columns(3)
         with c1: card("Clientes Totais", f"{int(data['current'][0]):,}", i_u, "text-3", data['current'][0], data['prev_mom'][0], data['prev_yoy'][0])
         with c2: card("LTV Médio", f"R$ {data['current'][1]:,.2f}", i_m, "orange", data['current'][1], data['prev_mom'][1], data['prev_yoy'][1])
         with c3: card("Ticket Médio", f"R$ {data['current'][2]:,.2f}", i_m, "purple", data['current'][2], data['prev_mom'][2], data['prev_yoy'][2])
-        st.write("")
+        
+        # GRAFICO DE EVOLUÇÃO DA BASE
+        st.markdown('<div class="chart-box"><div class="chart-title">Evolução da Base Total</div>', unsafe_allow_html=True)
+        if not data['evol_df'].empty:
+            st.area_chart(data['evol_df'].set_index('Data')['Clientes'], color="#006EFF", use_container_width=True)
+        else:
+            st.info("Sem dados suficientes para o período selecionado.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
         c4, c5, c6 = st.columns(3)
         with c4: card("Receita Total (ARPU)", f"R$ {data['current'][3]:,.2f}", i_rev, "sky", data['current'][3], data['prev_mom'][3], data['prev_yoy'][3])
         with c5: card("Identificados", f"{int(data['current'][0] * 0.84):,}", i_u, "purple", 1, 1, 1)

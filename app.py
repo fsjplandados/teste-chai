@@ -64,7 +64,7 @@ st.markdown("""
         box-shadow: none !important; width: 100% !important; margin-top: 14px !important;
     }
     
-    .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; min-height: 180px; }
+    .kpi-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 24px 28px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 20px; }
     .kpi-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
     .kpi-icon svg { width: 20px; height: 20px; stroke: #fff; fill: none; stroke-width: 2; }
     .kpi-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .1em; }
@@ -93,7 +93,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
-# LOGICA DE DADOS COM COMPARAÇÃO HISTÓRICA
+# LOGICA DE DADOS
 # ─────────────────────────────────────────────────────────────
 def run_query(con, source, d1, d2, uf, reg, sx, lj):
     where = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d1}' AND '{d2}'"]
@@ -103,7 +103,8 @@ def run_query(con, source, d1, d2, uf, reg, sx, lj):
     if lj != "Todas": where.append(f"LOJA = '{lj}'")
     where_str = " AND ".join(where)
     
-    sql = f"SELECT COUNT(*), AVG(VALOR_TOTAL), SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0) FROM {source} WHERE {where_str}"
+    # KPIs: Clientes, LTV Médio, Ticket Médio, Receita Total (ARPU Base)
+    sql = f"SELECT COUNT(*), AVG(VALOR_TOTAL), SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0), SUM(VALOR_TOTAL) FROM {source} WHERE {where_str}"
     return con.execute(sql).fetchone()
 
 @st.cache_data(ttl=600)
@@ -111,19 +112,13 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     con = duckdb.connect()
     source = "read_parquet('base_crm_p*.parquet')"
     
-    # Período Atual
     current = run_query(con, source, d_i, d_f, uf, reg, sx, lj)
-    
-    # Período Anterior (MoM)
     delta_days = (d_f - d_i).days + 1
     d_i_mom, d_f_mom = d_i - timedelta(days=delta_days), d_i - timedelta(days=1)
     prev_mom = run_query(con, source, d_i_mom, d_f_mom, uf, reg, sx, lj)
-    
-    # Período Ano Passado (YoY)
     d_i_yoy, d_f_yoy = d_i - relativedelta(years=1), d_f - relativedelta(years=1)
     prev_yoy = run_query(con, source, d_i_yoy, d_f_yoy, uf, reg, sx, lj)
     
-    # Dados de Perfil (Gênero e Faixa) - Baseados apenas no período atual
     where_curr = f"ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'"
     if uf != "Todas": where_curr += f" AND UF = '{uf}'"
     if sx != "Todas": where_curr += f" AND SEXO = '{sx}'"
@@ -131,20 +126,9 @@ def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
     g_res = con.execute(f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM {source} WHERE {where_curr} GROUP BY SEXO").df()
     a_res = con.execute(f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem, AVG(VALOR_TOTAL) as LTV FROM {source} WHERE {where_curr} GROUP BY FAIXA_ETARIA ORDER BY Faixa").df()
     
-    # Médias de idade aproximadas para o card
-    idade_media = con.execute(f"""
-        SELECT AVG(CASE 
-            WHEN FAIXA_ETARIA = '0-17' THEN 14 WHEN FAIXA_ETARIA = '18-25' THEN 22
-            WHEN FAIXA_ETARIA = '26-35' THEN 30 WHEN FAIXA_ETARIA = '36-45' THEN 40
-            WHEN FAIXA_ETARIA = '46-55' THEN 50 WHEN FAIXA_ETARIA = '56-65' THEN 60
-            WHEN FAIXA_ETARIA = 'Mais de 65' THEN 72 ELSE 42 END)
-        FROM {source} WHERE {where_curr}
-    """).fetchone()[0]
+    idade_media = con.execute(f"SELECT AVG(CASE WHEN FAIXA_ETARIA = '0-17' THEN 14 WHEN FAIXA_ETARIA = '18-25' THEN 22 WHEN FAIXA_ETARIA = '26-35' THEN 30 WHEN FAIXA_ETARIA = '36-45' THEN 40 WHEN FAIXA_ETARIA = '46-55' THEN 50 WHEN FAIXA_ETARIA = '56-65' THEN 60 WHEN FAIXA_ETARIA = 'Mais de 65' THEN 72 ELSE 42 END) FROM {source} WHERE {where_curr}").fetchone()[0]
 
-    return {
-        "current": current, "prev_mom": prev_mom, "prev_yoy": prev_yoy,
-        "g_res": g_res, "a_res": a_res, "idade_media": idade_media
-    }
+    return {"current": current, "prev_mom": prev_mom, "prev_yoy": prev_yoy, "g_res": g_res, "a_res": a_res, "idade_media": idade_media}
 
 # ─────────────────────────────────────────────────────────────
 # INTERFACE
@@ -153,23 +137,17 @@ st.markdown(f'<h1 style="font-size:24px; font-weight:800; color:#111827; margin-
 
 with st.form("filtros_globais"):
     r1_c1, r1_c2, r1_c3, r1_c4 = st.columns([1.5, 1, 1, 1])
-    hoje = date(2026, 4, 30) # Fixado em Abril para demonstração
+    hoje = date(2026, 4, 30)
     p_range = r1_c1.date_input("Período", value=(date(2026, 4, 1), date(2026, 4, 30)))
     uf_sel = r1_c2.selectbox("UF", ["Todas", "RS", "SC", "PR"])
     reg_sel = r1_c3.selectbox("Região", ["Todas", "Serra", "Litoral", "Metropolitana", "Interior"])
     canal_sel = r1_c4.selectbox("Canal", ["Todas", "Loja", "Digital", "Omni"])
-    
     r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns([1, 1, 1, 1, 1])
     sexo_sel = r2_c1.selectbox("Sexo", ["Todas", "M", "F"])
     loja_sel = r2_c2.selectbox("Loja", ["Todas", "Loja 01", "Loja 02", "Loja 10"])
     digital_sel = r2_c3.selectbox("Digital", ["Todos", "E-commerce", "APP", "SITE", "iFood"])
-    
     btn_atu = r2_c4.form_submit_button("Atualizar", type="primary")
     btn_lim = r2_c5.form_submit_button("Limpar filtros", type="secondary")
-    
-    if btn_lim:
-        st.query_params.update({"p": current_page})
-        st.rerun()
 
 d1, d2 = p_range if isinstance(p_range, (list, tuple)) and len(p_range) == 2 else (p_range, p_range)
 
@@ -183,7 +161,6 @@ try:
     def card(label, val, icon_svg, color, cur_val, prev_mom, prev_yoy):
         d_mom = get_delta(cur_val, prev_mom)
         d_yoy = get_delta(cur_val, prev_yoy)
-        
         def fmt_ind(v):
             if v == 0: return "--"
             icon = "▲" if v > 0 else "▼"
@@ -196,21 +173,15 @@ try:
             <div class="kpi-label">{label}</div>
             <div class="kpi-value">{val}</div>
             <div class="indicators">
-                <div class="ind-item">
-                    <div class="ind-label">Crescimento (Mês)</div>
-                    <div class="ind-val">{fmt_ind(d_mom)}</div>
-                </div>
-                <div class="ind-item">
-                    <div class="ind-label">Evolução (Ano)</div>
-                    <div class="ind-val">{fmt_ind(d_yoy)}</div>
-                </div>
+                <div class="ind-item"><div class="ind-label">Crescimento</div><div class="ind-val">{fmt_ind(d_mom)}</div></div>
+                <div class="ind-item"><div class="ind-label">Evolução</div><div class="ind-val">{fmt_ind(d_yoy)}</div></div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
     i_u = '<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>'
     i_m = '<svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>'
-    i_age = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
+    i_rev = '<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>'
 
     if current_page == "Base":
         c1, c2, c3 = st.columns(3)
@@ -219,13 +190,12 @@ try:
         with c3: card("Ticket Médio", f"R$ {data['current'][2]:,.2f}", i_m, "purple", data['current'][2], data['prev_mom'][2], data['prev_yoy'][2])
         st.write("")
         c4, c5, c6 = st.columns(3)
-        with c4: card("Idade Média", f"{int(data['idade_media'])} anos", i_age, "sky", data['idade_media'], data['idade_media'], data['idade_media'])
+        with c4: card("Receita Total (ARPU)", f"R$ {data['current'][3]:,.2f}", i_rev, "sky", data['current'][3], data['prev_mom'][3], data['prev_yoy'][3])
         with c5: card("Identificados", f"{int(data['current'][0] * 0.84):,}", i_u, "purple", 1, 1, 1)
         with c6: card("Ativos 90d", f"{int(data['current'][0] * 0.65):,}", i_u, "green", 1, 1, 1)
     else:
-        # Página de Perfil
         c1, c2, c3 = st.columns(3)
-        with c1: card("Idade Média", f"{int(data['idade_media'])} anos", i_age, "sky", 1, 1, 1)
+        with c1: card("Idade Média", f"{int(data['idade_media'])} anos", i_m, "sky", 1, 1, 1)
         st.write("---")
         t1, t2 = st.columns([1, 1.5])
         with t1:
@@ -234,6 +204,5 @@ try:
         with t2:
             st.subheader("Perfil por Faixa Etária")
             st.table(data['a_res'].style.format({"Porcentagem": "{:.1f}%", "LTV": "R$ {:.2f}"}))
-
 except Exception as e:
-    st.error(f"Erro ao carregar dados: {e}")
+    st.error(f"Erro: {e}")

@@ -72,7 +72,7 @@ st.markdown(f"""
 # ─────────────────────────────────────────────────────────────
 # LOGICA DE DADOS (ALINHADA SNOWFLAKE)
 # ─────────────────────────────────────────────────────────────
-def get_alinhamento_data(d_f, uf, cid, reg, sx, lj, can, dig):
+def get_alinhamento_data(d_i, d_f, uf, cid, reg, sx, lj, can, dig):
     con = duckdb.connect()
     source = "read_parquet('base_crm_p*.parquet')"
     
@@ -98,7 +98,15 @@ def get_alinhamento_data(d_f, uf, cid, reg, sx, lj, can, dig):
         AND CAST(ULTIMA_COMPRA_GERAL AS DATE) <= '{d_f}'
     """).fetchone()[0]
     
-    return totais, ativos
+    # KPI 3: Novos Clientes (Primeira compra dentro do período selecionado)
+    novos = con.execute(f"""
+        SELECT COUNT(*) FROM {source} 
+        WHERE {where_str} 
+        AND CAST(PRIMEIRA_COMPRA AS DATE) >= '{d_i}' 
+        AND CAST(PRIMEIRA_COMPRA AS DATE) <= '{d_f}'
+    """).fetchone()[0]
+    
+    return totais, ativos, novos
 
 # ─────────────────────────────────────────────────────────────
 # INTERFACE COM FILTROS COMPLETOS
@@ -131,7 +139,7 @@ else:
     d_i = d_f = p_range if not isinstance(p_range, (list, tuple)) else p_range[0]
 
 try:
-    totais, ativos = get_alinhamento_data(d_f, uf_sel, cid_sel, reg_sel, sexo_sel, loja_sel, canal_sel, digital_sel)
+    totais, ativos, novos = get_alinhamento_data(d_i, d_f, uf_sel, cid_sel, reg_sel, sexo_sel, loja_sel, canal_sel, digital_sel)
     
     def card(label, val, sub, icon_svg, color):
         st.markdown(f"""
@@ -144,12 +152,15 @@ try:
         """, unsafe_allow_html=True)
 
     i_u = '<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>'
+    i_n = '<svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/></svg>'
     
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1:
-        card("Clientes Totais", f"{totais:,}", "Contagem total da base (Datamart)", i_u, "text-3")
+        card("Clientes Totais", f"{totais:,}", "Tamanho da base histórica", i_u, "text-3")
     with c2:
-        card("Clientes Ativos (90d)", f"{ativos:,}", f"Janela: {(d_f - timedelta(days=90)).strftime('%d/%m')} a {d_f.strftime('%d/%m/%y')}", i_u, "green")
+        card("Novos Clientes", f"{novos:,}", f"Período: {d_i.strftime('%d/%m')} a {d_f.strftime('%d/%m')}", i_n, "sky")
+    with c3:
+        card("Clientes Ativos (90d)", f"{ativos:,}", f"Atividade até {d_f.strftime('%d/%m/%y')}", i_u, "green")
 
 except Exception as e:
     st.error(f"Erro: {e}")

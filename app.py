@@ -151,7 +151,7 @@ try:
     with c1:
         card("Clientes Totais", f"{totais:,}", "Contagem total da base (Datamart)", i_u, "text-3")
     with c2:
-        card("Clientes Ativos (90d)", f"{ativos:,}", f"Janela: {(data_ref - timedelta(days=90)).strftime('%d/%m')} a {data_ref.strftime('%d/%m/%y')}", i_u, "green")
+        card("Clientes Ativos (90d)", f"{ativos:,}", f"Janela: {(d_f - timedelta(days=90)).strftime('%d/%m')} a {d_f.strftime('%d/%m/%y')}", i_u, "green")
 
 except Exception as e:
     st.error(f"Erro: {e}")

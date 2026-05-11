@@ -77,33 +77,45 @@ def get_alinhamento_data(d_i, d_f, uf, cid, reg, sx, lj, can, dig):
     source = "read_parquet('base_crm_p*.parquet')"
     
     # Filtros de Dimensão
-    where = []
-    if uf != "Todas": where.append(f"UF = '{uf}'")
-    if cid != "Todas": where.append(f"CIDADE = '{cid}'")
-    if reg != "Todas": where.append(f"REGIAO = '{reg}'")
-    if sx != "Todas": where.append(f"SEXO = '{sx}'")
-    if lj != "Todas": where.append(f"LOJA = '{lj}'")
+    where_dim = []
+    if uf != "Todas": where_dim.append(f"UF = '{uf}'")
+    if cid != "Todas": where_dim.append(f"CIDADE = '{cid}'")
+    if reg != "Todas": where_dim.append(f"REGIAO = '{reg}'")
+    if sx != "Todas": where_dim.append(f"SEXO = '{sx}'")
+    if lj != "Todas": where_dim.append(f"LOJA = '{lj}'")
     
-    where_str = " AND ".join(where) if where else "1=1"
+    dim_str = " AND ".join(where_dim) if where_dim else "1=1"
     
-    # KPI 1: Clientes Totais (Sempre o total da base filtrado por dimensão)
-    totais = con.execute(f"SELECT COUNT(*) FROM {source} WHERE {where_str}").fetchone()[0]
+    # Tentar usar DATA_INCLUSAO (se não existir, usa PRIMEIRA_COMPRA como fallback seguro)
+    cols = con.execute(f"DESCRIBE SELECT * FROM {source} LIMIT 1").df()['column_name'].tolist()
+    col_inc = 'DATA_INCLUSAO' if 'DATA_INCLUSAO' in cols else 'PRIMEIRA_COMPRA'
+    col_ult = 'ULTIMA_COMPRA_GERAL' if 'ULTIMA_COMPRA_GERAL' in cols else 'ULTIMA_COMPRA'
+
+    # KPI 1: Clientes Totais (Snapshot até d_f)
+    # SQL: SELECT COUNT(*) FROM ... WHERE DATA_INCLUSAO <= d_f
+    totais = con.execute(f"""
+        SELECT COUNT(*) FROM {source} 
+        WHERE {dim_str} 
+        AND CAST({col_inc} AS DATE) <= '{d_f}'
+    """).fetchone()[0]
     
-    # KPI 2: Clientes Ativos 90d (Depende da data final d_f)
+    # KPI 2: Novos Clientes (Aquisição no Período)
+    # SQL: SELECT COUNT(*) FROM ... WHERE DATA_INCLUSAO BETWEEN d_i AND d_f
+    novos = con.execute(f"""
+        SELECT COUNT(*) FROM {source} 
+        WHERE {dim_str} 
+        AND CAST({col_inc} AS DATE) >= '{d_i}' 
+        AND CAST({col_inc} AS DATE) <= '{d_f}'
+    """).fetchone()[0]
+    
+    # KPI 3: Clientes Ativos 90d (Snapshot na data d_f)
+    # SQL: SELECT COUNT(*) FROM ... WHERE ULTIMA_COMPRA >= d_f-90 AND ULTIMA_COMPRA <= d_f
     d_90 = d_f - timedelta(days=90)
     ativos = con.execute(f"""
         SELECT COUNT(*) FROM {source} 
-        WHERE {where_str} 
-        AND CAST(ULTIMA_COMPRA_GERAL AS DATE) >= '{d_90}' 
-        AND CAST(ULTIMA_COMPRA_GERAL AS DATE) <= '{d_f}'
-    """).fetchone()[0]
-    
-    # KPI 3: Novos Clientes (Primeira compra dentro do período selecionado)
-    novos = con.execute(f"""
-        SELECT COUNT(*) FROM {source} 
-        WHERE {where_str} 
-        AND CAST(PRIMEIRA_COMPRA AS DATE) >= '{d_i}' 
-        AND CAST(PRIMEIRA_COMPRA AS DATE) <= '{d_f}'
+        WHERE {dim_str} 
+        AND CAST({col_ult} AS DATE) >= '{d_90}' 
+        AND CAST({col_ult} AS DATE) <= '{d_f}'
     """).fetchone()[0]
     
     return totais, ativos, novos

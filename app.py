@@ -109,7 +109,7 @@ st.markdown(f'<h1 style="font-size:24px; font-weight:800; color:#111827; margin-
 
 with st.form("filtros_globais"):
     r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns([1.5, 0.8, 0.8, 0.8, 0.8])
-    data_ref = r1_c1.date_input("Data de Referência (Fim)", value=date(2026, 1, 31))
+    p_range = r1_c1.date_input("Período de Referência", value=(date(2026, 1, 1), date(2026, 1, 31)))
     uf_sel = r1_c2.selectbox("UF", ["Todas", "RS", "SC", "PR"])
     
     # Cidades dinâmicas
@@ -126,8 +126,14 @@ with st.form("filtros_globais"):
     btn_atu = r2_c4.form_submit_button("Atualizar", type="primary")
     btn_lim = r2_c5.form_submit_button("Limpar filtros", type="secondary")
 
+# Lógica para tratar o intervalo selecionado
+if isinstance(p_range, (list, tuple)) and len(p_range) == 2:
+    d_i, d_f = p_range
+else:
+    d_i = d_f = p_range if not isinstance(p_range, (list, tuple)) else p_range[0]
+
 try:
-    totais, ativos = get_alinhamento_data(data_ref, uf_sel, cid_sel, reg_sel, sexo_sel, loja_sel, canal_sel, digital_sel)
+    totais, ativos = get_alinhamento_data(d_f, uf_sel, cid_sel, reg_sel, sexo_sel, loja_sel, canal_sel, digital_sel)
     
     def card(label, val, sub, icon_svg, color):
         st.markdown(f"""

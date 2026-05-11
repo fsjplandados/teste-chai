@@ -72,7 +72,6 @@ st.markdown(f"""
 # ─────────────────────────────────────────────────────────────
 # LOGICA DE DADOS (ALINHADA SNOWFLAKE)
 # ─────────────────────────────────────────────────────────────
-@st.cache_data(ttl=600)
 def get_alinhamento_data(d_f, uf, cid, reg, sx, lj, can, dig):
     con = duckdb.connect()
     source = "read_parquet('base_crm_p*.parquet')"
@@ -84,20 +83,19 @@ def get_alinhamento_data(d_f, uf, cid, reg, sx, lj, can, dig):
     if reg != "Todas": where.append(f"REGIAO = '{reg}'")
     if sx != "Todas": where.append(f"SEXO = '{sx}'")
     if lj != "Todas": where.append(f"LOJA = '{lj}'")
-    # Nota: Canal e Digital no Datamart_Clientes costumam ser baseados na última compra
     
     where_str = " AND ".join(where) if where else "1=1"
     
-    # KPI 1: Clientes Totais
+    # KPI 1: Clientes Totais (Sempre o total da base filtrado por dimensão)
     totais = con.execute(f"SELECT COUNT(*) FROM {source} WHERE {where_str}").fetchone()[0]
     
-    # KPI 2: Clientes Ativos 90d
+    # KPI 2: Clientes Ativos 90d (Depende da data final d_f)
     d_90 = d_f - timedelta(days=90)
     ativos = con.execute(f"""
         SELECT COUNT(*) FROM {source} 
         WHERE {where_str} 
-        AND ULTIMA_COMPRA_GERAL >= '{d_90}' 
-        AND ULTIMA_COMPRA_GERAL <= '{d_f}'
+        AND CAST(ULTIMA_COMPRA_GERAL AS DATE) >= '{d_90}' 
+        AND CAST(ULTIMA_COMPRA_GERAL AS DATE) <= '{d_f}'
     """).fetchone()[0]
     
     return totais, ativos

@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 
 # ─────────────────────────────────────────────────────────────
-# CONFIGURAÇÃO E DESIGN SYSTEM
+# CONFIGURAÇÃO E DESIGN SYSTEM (IGUAL AO PRINT)
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Dashboard CRM — Farmácias São João", layout="wide", initial_sidebar_state="collapsed")
 
@@ -65,12 +65,6 @@ st.markdown("""
     .kpi-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .1em; }
     .kpi-value { font-size: 28px; font-weight: 800; color: var(--text-1); letter-spacing: -0.5px; margin: 4px 0; }
     
-    /* ESTILO DO CARD DE GRAFICO */
-    .chart-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 32px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); margin-bottom: 32px; }
-    .chart-header { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }
-    .chart-header::before { content: ''; width: 4px; height: 16px; background: var(--blue); border-radius: 2px; }
-    .chart-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .1em; margin: 0; }
-
     .indicators { display: flex; gap: 12px; margin-top: 12px; border-top: 1px solid #f3f4f6; padding-top: 12px; }
     .ind-item { display: flex; flex-direction: column; gap: 2px; }
     .ind-label { font-size: 9px; font-weight: 600; color: var(--text-3); text-transform: uppercase; }
@@ -80,12 +74,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# SIDEBAR HTML
 st.markdown(f"""
 <div class="crm-sidebar">
     <div class="logo-circle"><img src="https://upload.wikimedia.org/wikipedia/commons/4/4b/Logo_Farmacias_Sao_Joao.png"></div>
     <a href="/?p=Base" target="_self" class="nav-item {"active" if current_page == "Base" else ""}">
-        <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <svg viewBox="0 0 24 24"><polyline points="22-12 18-12 15-21 9-3 6-12 2-12"/></svg>
     </a>
     <a href="/?p=Perfil" target="_self" class="nav-item {"active" if current_page == "Perfil" else ""}">
         <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
@@ -94,57 +87,58 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
-# LOGICA DE DADOS
+# LOGICA DE DADOS (STABLE + FILTROS COMPLETOS)
 # ─────────────────────────────────────────────────────────────
-def run_query(con, source, d1, d2, uf, reg, sx, lj):
+def run_query(con, source, d1, d2, uf, cid, reg, sx, lj, can, dig):
     where = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d1}' AND '{d2}'"]
     if uf != "Todas": where.append(f"UF = '{uf}'")
+    if cid != "Todas": where.append(f"CIDADE = '{cid}'")
     if reg != "Todas": where.append(f"REGIAO = '{reg}'")
     if sx != "Todas": where.append(f"SEXO = '{sx}'")
     if lj != "Todas": where.append(f"LOJA = '{lj}'")
+    if can != "Todas": where.append(f"CANAL = '{can}'")
+    if dig != "Todos": where.append(f"DIGITAL = '{dig}'")
+    
     where_str = " AND ".join(where)
     sql = f"SELECT COUNT(*), AVG(VALOR_TOTAL), SUM(VALOR_TOTAL) / NULLIF(SUM(TOTAL_COMPRAS), 0), SUM(VALOR_TOTAL) FROM {source} WHERE {where_str}"
     return con.execute(sql).fetchone()
 
-def get_trend_data(con, source, d1, d2, uf, sx):
-    where = [f"ULTIMA_COMPRA_GERAL BETWEEN '{d1}' AND '{d2}'"]
-    if uf != "Todas": where.append(f"UF = '{uf}'")
-    if sx != "Todas": where.append(f"SEXO = '{sx}'")
-    where_str = " AND ".join(where)
-    sql = f"SELECT ULTIMA_COMPRA_GERAL as Data, COUNT(*) as Clientes FROM {source} WHERE {where_str} GROUP BY 1 ORDER BY 1"
-    return con.execute(sql).df()
-
 @st.cache_data(ttl=600)
-def get_dashboard_data(d_i, d_f, uf, reg, sx, lj, can, dig):
+def get_dashboard_data(d_i, d_f, uf, cid, reg, sx, lj, can, dig):
     con = duckdb.connect()
     source = "read_parquet('base_crm_p*.parquet')"
-    current = run_query(con, source, d_i, d_f, uf, reg, sx, lj)
+    
+    current = run_query(con, source, d_i, d_f, uf, cid, reg, sx, lj, can, dig)
+    
     delta_days = (d_f - d_i).days + 1
     d_i_mom, d_f_mom = d_i - timedelta(days=delta_days), d_i - timedelta(days=1)
-    prev_mom_res = run_query(con, source, d_i_mom, d_f_mom, uf, reg, sx, lj)
+    prev_mom_res = run_query(con, source, d_i_mom, d_f_mom, uf, cid, reg, sx, lj, can, dig)
+    
     d_i_yoy, d_f_yoy = d_i - relativedelta(years=1), d_f - relativedelta(years=1)
-    prev_yoy_res = run_query(con, source, d_i_yoy, d_f_yoy, uf, reg, sx, lj)
-    curr_trend = get_trend_data(con, source, d_i, d_f, uf, sx)
-    prev_trend = get_trend_data(con, source, d_i_mom, d_f_mom, uf, sx)
-    g_res = con.execute(f"SELECT SEXO as Gênero, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem FROM {source} WHERE ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}' GROUP BY SEXO").df()
-    a_res = con.execute(f"SELECT FAIXA_ETARIA as Faixa, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as Porcentagem, AVG(VALOR_TOTAL) as LTV FROM {source} WHERE ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}' GROUP BY FAIXA_ETARIA ORDER BY Faixa").df()
-    idade_media = con.execute(f"SELECT AVG(CASE WHEN FAIXA_ETARIA = '0-17' THEN 14 WHEN FAIXA_ETARIA = '18-25' THEN 22 WHEN FAIXA_ETARIA = '26-35' THEN 30 WHEN FAIXA_ETARIA = '36-45' THEN 40 WHEN FAIXA_ETARIA = '46-55' THEN 50 WHEN FAIXA_ETARIA = '56-65' THEN 60 WHEN FAIXA_ETARIA = 'Mais de 65' THEN 72 ELSE 42 END) FROM {source} WHERE ULTIMA_COMPRA_GERAL BETWEEN '{d_i}' AND '{d_f}'").fetchone()[0]
-    return {"current": current, "prev_mom": prev_mom_res, "prev_yoy": prev_yoy_res, "curr_trend": curr_trend, "prev_trend": prev_trend, "g_res": g_res, "a_res": a_res, "idade_media": idade_media}
+    prev_yoy_res = run_query(con, source, d_i_yoy, d_f_yoy, uf, cid, reg, sx, lj, can, dig)
+    
+    return {"current": current, "prev_mom": prev_mom_res, "prev_yoy": prev_yoy_res}
 
 # ─────────────────────────────────────────────────────────────
-# INTERFACE
+# INTERFACE (EXATAMENTE COMO O PRINT + CIDADE)
 # ─────────────────────────────────────────────────────────────
 st.markdown(f'<h1 style="font-size:24px; font-weight:800; color:#111827; margin-bottom:20px;">Dashboard CRM</h1>', unsafe_allow_html=True)
 
 with st.form("filtros_globais"):
-    r1_c1, r1_c2, r1_c3, r1_c4 = st.columns([1.5, 1, 1, 1])
+    r1_c1, r1_c2, r1_c3, r1_c4, r1_c5 = st.columns([1.5, 0.8, 0.8, 0.8, 0.8])
     p_range = r1_c1.date_input("Período", value=(date(2026, 4, 1), date(2026, 4, 30)))
     uf_sel = r1_c2.selectbox("UF", ["Todas", "RS", "SC", "PR"])
-    reg_sel = r1_c3.selectbox("Região", ["Todas", "Serra", "Litoral", "Metropolitana", "Interior"])
-    canal_sel = r1_c4.selectbox("Canal", ["Todas", "Loja", "Digital", "Omni"])
+    
+    # Busca cidades dinâmicas
+    con_tmp = duckdb.connect()
+    cidades = ["Todas"] + sorted(con_tmp.execute(f"SELECT DISTINCT CIDADE FROM read_parquet('base_crm_p*.parquet') WHERE CIDADE IS NOT NULL {'AND UF = '+chr(39)+uf_sel+chr(39) if uf_sel != 'Todas' else ''}").df()['CIDADE'].tolist())
+    cid_sel = r1_c3.selectbox("Cidade", cidades)
+    reg_sel = r1_c4.selectbox("Região", ["Todas", "Serra", "Litoral", "Metropolitana", "Interior"])
+    canal_sel = r1_c5.selectbox("Canal", ["Todas", "Loja", "Digital", "Omni"])
+    
     r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns([1, 1, 1, 1, 1])
     sexo_sel = r2_c1.selectbox("Sexo", ["Todas", "M", "F"])
-    loja_sel = r2_c2.selectbox("Loja", ["Todas", "Loja 01", "Loja 02", "Loja 10"])
+    loja_sel = r2_c2.selectbox("Loja", ["Todas", "Loja 01", "Loja 02"])
     digital_sel = r2_c3.selectbox("Digital", ["Todos", "E-commerce", "APP", "SITE", "iFood"])
     btn_atu = r2_c4.form_submit_button("Atualizar", type="primary")
     btn_lim = r2_c5.form_submit_button("Limpar filtros", type="secondary")
@@ -152,7 +146,7 @@ with st.form("filtros_globais"):
 d1, d2 = p_range if isinstance(p_range, (list, tuple)) and len(p_range) == 2 else (p_range, p_range)
 
 try:
-    data = get_dashboard_data(d1, d2, uf_sel, reg_sel, sexo_sel, loja_sel, canal_sel, digital_sel)
+    data = get_dashboard_data(d1, d2, uf_sel, cid_sel, reg_sel, sexo_sel, loja_sel, canal_sel, digital_sel)
     
     def get_delta(cur, prev):
         if not prev or prev == 0: return 0
@@ -168,38 +162,11 @@ try:
 
     i_u = '<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>'
     i_m = '<svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>'
-    i_rev = '<svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>'
 
-    if current_page == "Base":
-        c1, c2, c3 = st.columns(3)
-        with c1: card("Clientes Totais", f"{int(data['current'][0]):,}", i_u, "text-3", data['current'][0], data['prev_mom'][0], data['prev_yoy'][0])
-        with c2: card("LTV Médio", f"R$ {data['current'][1]:,.2f}", i_m, "orange", data['current'][1], data['prev_mom'][1], data['prev_yoy'][1])
-        with c3: card("Ticket Médio", f"R$ {data['current'][2]:,.2f}", i_m, "purple", data['current'][2], data['prev_mom'][2], data['prev_yoy'][2])
-        
-        # ─── SOLUÇÃO DE UNIFICAÇÃO SEGURA ───
-        st.markdown('<div class="chart-card">', unsafe_allow_html=True)
-        st.markdown('<div class="chart-header"><h3 class="chart-label">Evolução da Base vs Período Anterior</h3></div>', unsafe_allow_html=True)
-        if not data['curr_trend'].empty:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=data['curr_trend']['Data'], y=data['prev_trend']['Clientes'] if not data['prev_trend'].empty else [0]*len(data['curr_trend']), mode='lines', line=dict(color='#E5E7EB', width=2, dash='dot'), name='Período Anterior', hoverinfo='skip'))
-            fig.add_trace(go.Scatter(x=data['curr_trend']['Data'], y=data['curr_trend']['Clientes'], mode='lines', fill='tozeroy', line=dict(color='#006EFF', width=3), fillcolor='rgba(0, 110, 255, 0.04)', name='Período Selecionado', hovertemplate='<b>%{x}</b><br>Clientes: %{y:,.0f}'))
-            fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=350, showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="left", x=0, font=dict(family='Inter', size=11, color='#6B7280')), paper_bgcolor='white', plot_bgcolor='white', xaxis=dict(showgrid=False, showline=False, tickfont=dict(family='Inter', size=10, color='#9CA3AF')), yaxis=dict(showgrid=True, gridcolor='#F3F4F6', tickfont=dict(family='Inter', size=10, color='#9CA3AF'), tickformat=',.0f'), hovermode='x unified', spikedistance=-1, hoverdistance=100)
-            fig.update_traces(marker=dict(size=10, color='#006EFF', opacity=1, line=dict(width=2, color='white')), selector=dict(name='Período Selecionado'))
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        st.markdown('</div>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    with c1: card("Clientes Totais", f"{int(data['current'][0]):,}", i_u, "text-3", data['current'][0], data['prev_mom'][0], data['prev_yoy'][0])
+    with c2: card("LTV Médio", f"R$ {data['current'][1]:,.2f}", i_m, "orange", data['current'][1], data['prev_mom'][1], data['prev_yoy'][1])
+    with c3: card("Ticket Médio", f"R$ {data['current'][2]:,.2f}", i_m, "purple", data['current'][2], data['prev_mom'][2], data['prev_yoy'][2])
 
-        c4, c5, c6 = st.columns(3)
-        with c4: card("Receita Total (ARPU)", f"R$ {data['current'][3]:,.2f}", i_rev, "sky", data['current'][3], data['prev_mom'][3], data['prev_yoy'][3])
-        with c5: card("Identificados", f"{int(data['current'][0] * 0.84):,}", i_u, "purple", 1, 1, 1)
-        with c6: card("Ativos 90d", f"{int(data['current'][0] * 0.65):,}", i_u, "green", 1, 1, 1)
-    else:
-        c1, c2, c3 = st.columns(3)
-        with c1: card("Idade Média", f"{int(data['idade_media'])} anos", i_m, "sky", 1, 1, 1)
-        st.write("---")
-        t1, t2 = st.columns([1, 1.5])
-        with t1:
-            st.subheader("Distribuição por Gênero"); st.table(data['g_res'].style.format({"Porcentagem": "{:.1f}%"}))
-        with t2:
-            st.subheader("Perfil por Faixa Etária"); st.table(data['a_res'].style.format({"Porcentagem": "{:.1f}%", "LTV": "R$ {:.2f}"}))
 except Exception as e:
     st.error(f"Erro: {e}")

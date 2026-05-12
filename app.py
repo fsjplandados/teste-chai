@@ -75,18 +75,21 @@ st.markdown(f"""
 @st.cache_resource
 def get_connection():
     # 1. Tenta usar Streamlit Secrets (Nuvem / Produção)
-    if "connections" in st.secrets and "snowflake" in st.secrets.connections:
-        import snowflake.connector
-        conn = snowflake.connector.connect(**st.secrets["connections"]["snowflake"])
-        return conn
+    try:
+        if "connections" in st.secrets and "snowflake" in st.secrets.connections:
+            import snowflake.connector
+            conn = snowflake.connector.connect(**st.secrets["connections"]["snowflake"])
+            return conn
+    except Exception:
+        pass # Ignora se não houver secrets (ex: rodando local)
+        
     # 2. Fallback para ODBC Local (SSO do Usuário no Windows)
-    else:
-        try:
-            import pyodbc
-            return pyodbc.connect('DSN=SNOWFLAKE_FSJ', autocommit=True)
-        except Exception as e:
-            st.error(f"Falha ao conectar via ODBC local: {e}")
-            st.stop()
+    try:
+        import pyodbc
+        return pyodbc.connect('DSN=SNOWFLAKE_FSJ', autocommit=True)
+    except Exception as e:
+        st.error(f"Falha ao conectar via ODBC local: {e}")
+        st.stop()
 
 # Cache de 10 minutos para não onerar o Snowflake e garantir velocidade
 @st.cache_data(ttl=600, show_spinner=False)

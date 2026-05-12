@@ -1,6 +1,14 @@
 *.parquet
 !base_crm_p1.parquet
 !base_crm_p2.parquet
+!base_crm_p3.parquet
+!base_crm_p4.parquet
+!base_crm_p5.parquet
+!base_crm_p6.parquet
+!base_crm_p7.parquet
+!base_crm_p8.parquet
+!base_crm_p9.parquet
+!base_crm_p10.parquet
 test.parquet
 base_crm.parquet
 etl_parquet.py
